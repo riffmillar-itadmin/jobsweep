@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------------
+#  Line endings are declared HERE so a clone behaves identically on every
+#  machine, instead of depending on whatever core.autocrlf each person has set.
+#  Without this file, two contributors can produce diffs that differ in every
+#  line while the code is unchanged.
+# ---------------------------------------------------------------------------
+
+#  Normalise everything git detects as text to LF, in the repository AND in the
+#  working tree. PowerShell -- Windows PowerShell 5.1 included -- reads LF
+#  scripts without complaint, so there is no reason to carry two conventions.
+*               text=auto eol=lf
+
+#  Never transform these, whatever git's content detection thinks.
+*.png           binary
+*.jpg           binary
+*.ico           binary
+*.zip           binary

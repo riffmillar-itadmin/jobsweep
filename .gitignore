@@ -1,0 +1,29 @@
+# ---------------------------------------------------------------------------
+#  THE FIRST LINE IS THE ONE THAT MATTERS.
+#  JobSweep.local.psd1 holds your commute boundary and your employer watchlist.
+#  Published, it is a map of your job search. Confirm it is ABSENT from a
+#  commit -- `git status` and the full diff -- not merely present-and-ignored.
+# ---------------------------------------------------------------------------
+JobSweep.local.psd1
+
+# Your own profile assertions. Every line is a statement about where you will
+# and will not travel.
+Test-JobSweepProfile.ps1
+
+# ---- run output ----
+Sweeps/
+_seen.json
+*.log
+*.csv
+candidates.json
+
+# ---- editor and OS scratch ----
+*.bak
+*.bak-*
+*.tmp
+*~
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
