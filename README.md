@@ -124,6 +124,12 @@ after any change to the title, location or remote lists.
 
 Windows PowerShell 5.1 or PowerShell 7. No modules.
 
+## Changelog
+
+- **1.1.0** (2026-10-20): default `-OutputRoot` is now
+  `%USERPROFILE%\OneDrive\Employment\Claude workspace`.
+- **1.0.0**: initial release.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE).

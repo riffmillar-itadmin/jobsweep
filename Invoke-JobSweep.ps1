@@ -25,7 +25,7 @@
     not reported again.
 
 .PARAMETER OutputRoot
-    Folder to write Sweeps\ into. Defaults to the Claude-accessible Employment folder.
+    Folder to write Sweeps\ into. Defaults to the Employment\Claude workspace folder.
 
 .PARAMETER Source
     Run only one provider: Greenhouse, Lever, Workday, Microsoft. Omit for all.
@@ -71,13 +71,16 @@
     Revised 2026-09-09: ADP WorkforceNow provider added (Lighthouse -- legal technology),
     plus information-governance and eDiscovery title keywords.
 
+    1.1.0 (2026-10-20): default OutputRoot moved from Employment\Claude accessible to
+    Employment\Claude workspace.
+
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
 #>
 
 [CmdletBinding()]
 param(
-    [string] $OutputRoot = "$env:USERPROFILE\OneDrive\Employment\Claude accessible",
+    [string] $OutputRoot = "$env:USERPROFILE\OneDrive\Employment\Claude workspace",
     [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro')]
     [string] $Source,
     [switch] $DryRun,
@@ -100,7 +103,8 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$UserAgent = 'JobSweep/1.0 (+https://github.com/riffmillar-itadmin/jobsweep)'
+$JobSweepVersion = '1.1.0'
+$UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
 
@@ -1522,7 +1526,7 @@ $script:LogFile = Join-Path $logDir ("sweep-{0}.log" -f $logStamp)
 
 
 Write-Log ('=' * 62)
-Write-Log "Job sweep starting. Host PS $($PSVersionTable.PSVersion). DryRun=$($DryRun.IsPresent) SkipDetail=$($SkipDetail.IsPresent) Source=$(if($Source){$Source}else{'all'})"
+Write-Log "Job sweep $JobSweepVersion starting. Host PS $($PSVersionTable.PSVersion). DryRun=$($DryRun.IsPresent) SkipDetail=$($SkipDetail.IsPresent) Source=$(if($Source){$Source}else{'all'})"
 Write-Log "Output root: $OutputRoot"
 
 # prune old logs so the folder does not grow without bound
