@@ -10,6 +10,11 @@
 
 @{
 
+# Where Sweeps\ is written. Optional: omit it and output goes beside the script.
+# The folder must already exist. %VAR% references are expanded; -OutputRoot on
+# the command line overrides this.
+# OutputRoot = '%USERPROFILE%\Documents\JobSweep'
+
 # Hard out, wherever the posting claims to be. Country and region names.
 LocationExclude = @(
     'canada','ontario','toronto','vancouver, bc',

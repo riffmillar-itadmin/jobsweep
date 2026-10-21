@@ -25,7 +25,8 @@
     not reported again.
 
 .PARAMETER OutputRoot
-    Folder to write Sweeps\ into. Defaults to the Employment\Claude workspace folder.
+    Folder to write Sweeps\ into. Overrides OutputRoot in your local profile; with
+    neither set, Sweeps\ goes beside this script.
 
 .PARAMETER Source
     Run only one provider: Greenhouse, Lever, Workday, Microsoft. Omit for all.
@@ -73,6 +74,8 @@
 
     1.1.0 (2026-10-20): default OutputRoot moved from Employment\Claude accessible to
     Employment\Claude workspace.
+    1.2.0 (2026-10-20): no personal path in the script. OutputRoot is now a local
+    profile key (%VAR% expanded); the fallback is the script's own folder.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -80,7 +83,9 @@
 
 [CmdletBinding()]
 param(
-    [string] $OutputRoot = "$env:USERPROFILE\OneDrive\Employment\Claude workspace",
+    # Resolved after the profiles load: this parameter, else OutputRoot in a
+    # profile, else the folder this script lives in.
+    [string] $OutputRoot,
     [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro')]
     [string] $Source,
     [switch] $DryRun,
@@ -103,7 +108,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.1.0'
+$JobSweepVersion = '1.2.0'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -270,7 +275,7 @@ function Merge-JobSweepProfile {
         [string[]] $KnownKeys = @(
             'TitleInclude','TitleProtect','TitleExclude',
             'LocationExclude','CommuteExclude','LocationInclude',
-            'RemoteBlock','LiftingLimitLb','Sources'
+            'RemoteBlock','LiftingLimitLb','Sources','OutputRoot'
         )
     )
 
@@ -323,6 +328,18 @@ if (-not $ProfilePath) {
     )
 }
 $Config = Merge-JobSweepProfile -Defaults $Config -ProfilePath $ProfilePath
+
+# Where you keep your sweeps is personal, so it lives in the LOCAL profile, not
+# here. A .psd1 cannot read $env:, so %VAR% references in the profile value are
+# expanded. With neither set, output lands beside the script, where Sweeps\ is
+# gitignored.
+if (-not $PSBoundParameters.ContainsKey('OutputRoot')) {
+    $OutputRoot = if ($Config.ContainsKey('OutputRoot') -and $Config.OutputRoot) {
+        [Environment]::ExpandEnvironmentVariables($Config.OutputRoot)
+    } else {
+        Split-Path -Parent $PSCommandPath
+    }
+}
 
 # ============================================================================
 #  LOGGING AND RETRY

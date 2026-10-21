@@ -55,7 +55,8 @@ cd jobsweep
 
 # 2. Make your own geography and employer list.
 Copy-Item JobSweep.local.example.psd1 JobSweep.local.psd1
-#    ...edit it: LocationInclude, CommuteExclude, and real ATS tokens in Sources.
+#    ...edit it: LocationInclude, CommuteExclude, real ATS tokens in Sources,
+#    and optionally OutputRoot.
 
 # 3. Point the suite at your profile to see what your own rules do.
 .\Test-JobSweepFilters.ps1 -ProfilePath @('.\JobSweep.targeting.psd1', '.\JobSweep.local.psd1')
@@ -67,6 +68,12 @@ Copy-Item JobSweep.local.example.psd1 JobSweep.local.psd1
 The collector defaults to the two real profile files beside it and **throws if
 either is missing**, by design — a profile that fails to load leaves the title
 list empty, matches nothing, and reports a normal-looking quiet day.
+
+Output goes to `<OutputRoot>\Sweeps`. `OutputRoot` is, in order of precedence,
+the `-OutputRoot` parameter, the `OutputRoot` key in your local profile
+(`%USERPROFILE%`-style variables are expanded), or the folder the script lives
+in, where `Sweeps\` is gitignored. Whichever applies must already exist: the
+run stops rather than create a folder somewhere nobody looks.
 
 ## How screening works
 
@@ -126,6 +133,8 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.2.0** (2026-10-20): no personal path in the script. `OutputRoot` is a
+  local profile key; with none set, output goes beside the script.
 - **1.1.0** (2026-10-20): default `-OutputRoot` is now
   `%USERPROFILE%\OneDrive\Employment\Claude workspace`.
 - **1.0.0**: initial release.
