@@ -19,6 +19,11 @@
 
 .EXAMPLE
     .\Test-JobSweepFilters.ps1
+
+.EXAMPLE
+    .\Test-JobSweepFilters.ps1 -BothEditions
+    Runs the suite under Windows PowerShell 5.1 and PowerShell 7. Exits 1 if
+    either fails or is not installed. Run this before every commit.
 #>
 
 [CmdletBinding()]
@@ -26,11 +31,45 @@ param(
     [string]   $SweepScript = "$PSScriptRoot\Invoke-JobSweep.ps1",
     # Profiles to merge onto the defaults before testing. Defaults to the pair
     # beside the sweep script -- point this at another profile to test it.
-    [string[]] $ProfilePath
+    [string[]] $ProfilePath,
+    # Re-run this suite, with the same arguments, under powershell.exe AND pwsh.
+    [switch]   $BothEditions
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# The collector claims 5.1 and 7, and the two differ in ways that bite: web error
+# shapes, default encodings, what -File does with an array argument. A green run
+# on one edition says nothing about the other, so -BothEditions runs each in its
+# own process and fails if either fails -- or is missing, since a skipped edition
+# is exactly the silent pass this suite exists to prevent.
+if ($BothEditions) {
+    # -Command rather than -File: -File passes an array as one string, which
+    # would break -ProfilePath.
+    $q    = { param($s) "'" + ($s -replace "'", "''") + "'" }
+    $call = "& $(& $q $PSCommandPath) -SweepScript $(& $q $SweepScript)"
+    if ($ProfilePath) { $call += ' -ProfilePath ' + (($ProfilePath | ForEach-Object { & $q $_ }) -join ',') }
+    $call += '; exit $LASTEXITCODE'
+
+    $results = foreach ($exe in 'powershell.exe', 'pwsh') {
+        Write-Host "`n==== $exe ====" -ForegroundColor Cyan
+        if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) {
+            Write-Host "$exe not found -- cannot test this edition." -ForegroundColor Red
+            [pscustomobject]@{ Edition = $exe; Version = '-'; Result = 'MISSING' }
+            continue
+        }
+        $ver = & $exe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+        & $exe -NoProfile -ExecutionPolicy Bypass -Command $call | Out-Host
+        $code = $LASTEXITCODE
+        [pscustomobject]@{ Edition = $exe; Version = "$ver"; Result = $(if ($code -eq 0) { 'PASS' } else { "FAIL (exit $code)" }) }
+    }
+
+    Write-Host "`n==== summary ====" -ForegroundColor Cyan
+    $results | Format-Table -AutoSize | Out-Host
+    if (@($results | Where-Object { $_.Result -ne 'PASS' }).Count -gt 0) { exit 1 }
+    exit 0
+}
 
 if (-not (Test-Path -LiteralPath $SweepScript)) { throw "Sweep script not found: $SweepScript" }
 

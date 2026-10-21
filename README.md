@@ -119,7 +119,8 @@ The merge fails loudly if `TitleInclude`, `TitleExclude`, `LocationInclude` or
 ## Tests
 
 ```powershell
-.\Test-JobSweepFilters.ps1
+.\Test-JobSweepFilters.ps1                # the edition you are in
+.\Test-JobSweepFilters.ps1 -BothEditions  # Windows PowerShell 5.1 AND PowerShell 7
 ```
 
 No network, no state, no output files. It pulls the config block and the pure
@@ -127,12 +128,21 @@ No network, no state, no output files. It pulls the config block and the pure
 AST, so it tests the real filter rather than a copy that can drift. Run it
 after any change to the title, location or remote lists.
 
+The collector supports both editions, and a pass on one says nothing about the
+other. `-BothEditions` runs the suite in a separate `powershell.exe` and `pwsh`
+process with the same `-SweepScript` / `-ProfilePath`, prints a summary, and
+exits 1 if either edition fails **or is not installed**. Use it before every
+commit.
+
 ## Requirements
 
 Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.2.3** (2026-10-20): `Test-JobSweepFilters.ps1 -BothEditions` runs the
+  suite under Windows PowerShell 5.1 and PowerShell 7 and fails if either
+  fails or is missing.
 - **1.2.2** (2026-10-20): changelog wording only.
 - **1.2.1** (2026-10-20): a profile that fails to load (missing file, unknown
   key) now reports that error and exits 2, instead of

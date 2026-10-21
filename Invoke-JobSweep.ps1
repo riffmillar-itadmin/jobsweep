@@ -78,6 +78,8 @@
     1.2.1 (2026-10-20): a profile that fails to load now reports its own error, logs
     beside the script and exits 2, instead of "Write-Log is not recognized".
     1.2.2 (2026-10-20): changelog wording only.
+    1.2.3 (2026-10-20): Test-JobSweepFilters.ps1 -BothEditions runs the suite under
+    Windows PowerShell 5.1 and PowerShell 7, failing if either fails or is missing.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -110,7 +112,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.2.2'
+$JobSweepVersion = '1.2.3'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
