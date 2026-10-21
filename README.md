@@ -37,7 +37,7 @@ That is what the test suite is for.
 | `JobSweep.local.psd1` | ⛔ **gitignored** | **Where you will go and who you are watching.** Geography, commute boundary, remote rules, and the employer list. |
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography with placeholder employers. Copy it. |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 236 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 258 cases, no network. |
 
 `JobSweep.local.psd1` is the file that must never be published. It is first in
 `.gitignore` for that reason. Before making a repository public, read
@@ -133,6 +133,9 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.2.1** (2026-10-20): a profile that fails to load (missing file, unknown
+  key) now reports that error and exits 2, instead of
+  "Write-Log is not recognized".
 - **1.2.0** (2026-10-20): no personal path in the script. `OutputRoot` is a
   local profile key; with none set, output goes beside the script.
 - **1.1.0** (2026-10-20): default `-OutputRoot` is now

@@ -76,6 +76,8 @@
     Employment\Claude workspace.
     1.2.0 (2026-10-20): no personal path in the script. OutputRoot is now a local
     profile key (%VAR% expanded); the fallback is the script's own folder.
+    1.2.1 (2026-10-20): a profile that fails to load now reports its own error, logs
+    beside the script and exits 2, instead of "Write-Log is not recognized".
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -108,7 +110,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.2.0'
+$JobSweepVersion = '1.2.1'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -319,32 +321,14 @@ function Merge-JobSweepProfile {
     $merged
 }
 
-# Profiles live beside this script unless -ProfilePath says otherwise.
-if (-not $ProfilePath) {
-    $here = Split-Path -Parent $PSCommandPath
-    $ProfilePath = @(
-        (Join-Path $here 'JobSweep.targeting.psd1')
-        (Join-Path $here 'JobSweep.local.psd1')
-    )
-}
-$Config = Merge-JobSweepProfile -Defaults $Config -ProfilePath $ProfilePath
-
-# Where you keep your sweeps is personal, so it lives in the LOCAL profile, not
-# here. A .psd1 cannot read $env:, so %VAR% references in the profile value are
-# expanded. With neither set, output lands beside the script, where Sweeps\ is
-# gitignored.
-if (-not $PSBoundParameters.ContainsKey('OutputRoot')) {
-    $OutputRoot = if ($Config.ContainsKey('OutputRoot') -and $Config.OutputRoot) {
-        [Environment]::ExpandEnvironmentVariables($Config.OutputRoot)
-    } else {
-        Split-Path -Parent $PSCommandPath
-    }
-}
-
 # ============================================================================
 #  LOGGING AND RETRY
 # ============================================================================
 
+# Write-Log and the startup helpers are defined BEFORE the profiles load. The trap
+# in MAIN covers the whole script, and when it fired on a profile error with
+# Write-Log not yet defined, all anyone saw was "Write-Log is not recognized" --
+# the real error, a missing profile or an unknown key, was swallowed. Fixed 2026-10-20.
 function Write-Log {
     param(
         [Parameter(Mandatory)][string] $Message,
@@ -363,6 +347,56 @@ function Write-Log {
         'STEP'  { Write-Host $Message -ForegroundColor Cyan }
         default { Write-Host $Message -ForegroundColor DarkGray }
     }
+}
+
+function Open-FallbackLog {
+    <# Before the output root is known there is no Sweeps\logs, so a run that dies
+       at startup logs beside the script instead. There is still a record of why. #>
+    param([string] $Stamp)
+    $fallbackDir = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'logs' } else { Join-Path $env:TEMP 'JobSweep-logs' }
+    try {
+        if (-not (Test-Path $fallbackDir)) { New-Item -ItemType Directory -Path $fallbackDir -Force | Out-Null }
+        $script:LogFile = Join-Path $fallbackDir ("sweep-{0}.log" -f $Stamp)
+    } catch { }
+}
+
+function Complete-RunEarly {
+    Write-Log ('-' * 62)
+    Write-Log 'Aborted during startup. Exit code 2.' 'ERROR'
+}
+
+$logStamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
+
+# Profiles live beside this script unless -ProfilePath says otherwise.
+if (-not $ProfilePath) {
+    $here = Split-Path -Parent $PSCommandPath
+    $ProfilePath = @(
+        (Join-Path $here 'JobSweep.targeting.psd1')
+        (Join-Path $here 'JobSweep.local.psd1')
+    )
+}
+
+try {
+    $Config = Merge-JobSweepProfile -Defaults $Config -ProfilePath $ProfilePath
+
+    # Where you keep your sweeps is personal, so it lives in the LOCAL profile, not
+    # here. A .psd1 cannot read $env:, so %VAR% references in the profile value are
+    # expanded. With neither set, output lands beside the script, where Sweeps\ is
+    # gitignored.
+    if (-not $PSBoundParameters.ContainsKey('OutputRoot')) {
+        $OutputRoot = if ($Config.ContainsKey('OutputRoot') -and $Config.OutputRoot) {
+            [Environment]::ExpandEnvironmentVariables([string]$Config.OutputRoot)
+        } else {
+            Split-Path -Parent $PSCommandPath
+        }
+    }
+} catch {
+    Open-FallbackLog $logStamp
+    Write-Log ('=' * 62)
+    Write-Log "Profile failed to load: $($_.Exception.Message)" 'ERROR'
+    Write-Log "Profiles: $($ProfilePath -join ', ')" 'ERROR'
+    Complete-RunEarly
+    exit 2
 }
 
 function Get-HttpFailure {
@@ -1479,11 +1513,6 @@ function Add-MicrosoftDetail {
 #  MAIN
 # ============================================================================
 
-function Complete-RunEarly {
-    Write-Log ('-' * 62)
-    Write-Log 'Aborted during startup. Exit code 2.' 'ERROR'
-}
-
 function Complete-Run {
     <# Writes the closing summary. Exit code is what Task Scheduler shows as
        Last Run Result: 0 clean, 1 completed with warnings or provider failures,
@@ -1513,17 +1542,11 @@ trap {
 # A scheduled task with a bad "Start in", or one running under a profile where
 # USERPROFILE differs, must fail loudly here rather than quietly writing a Sweeps
 # folder somewhere nobody looks.
-$logStamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
 $rootOk   = $false
 try { $rootOk = Test-Path -LiteralPath $OutputRoot -PathType Container } catch { }
 
 if (-not $rootOk) {
-    # Log beside the script so there is still a record of why the run died.
-    $fallbackDir = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'logs' } else { Join-Path $env:TEMP 'JobSweep-logs' }
-    try {
-        if (-not (Test-Path $fallbackDir)) { New-Item -ItemType Directory -Path $fallbackDir -Force | Out-Null }
-        $script:LogFile = Join-Path $fallbackDir ("sweep-{0}.log" -f $logStamp)
-    } catch { }
+    Open-FallbackLog $logStamp
     Write-Log ('=' * 62)
     Write-Log "OutputRoot does not exist or is not a folder: $OutputRoot" 'ERROR'
     Write-Log "Current directory is $((Get-Location).Path) -- note the script does not use it." 'ERROR'

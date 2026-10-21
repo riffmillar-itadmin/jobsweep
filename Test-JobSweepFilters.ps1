@@ -543,5 +543,24 @@ Check 'IT Asset Manager KEPT'      (Test-TitleMatch 'IT Hardware Asset Manager')
 Check 'HW Deployment Eng DROPS'    (Test-TitleMatch 'Hardware Deployment Engineer').Ok           $false
 Check 'and not via the HW rule'    (Test-TitleMatch 'Hardware Deployment Engineer').Reason       'title did not match any target keyword'
 
+Write-Host "`n-- STARTUP: a profile error reports itself, not 'Write-Log is not recognized' (added 2026-10-20) --"
+# Script functions exist only once execution reaches them, and the trap in MAIN
+# covers the whole script. If the merge throws before Write-Log is defined, the
+# trap's own Write-Log call fails and the real error is lost. Checked from the AST
+# so the suite stays free of network, state and output files.
+$writeLogDef = @($ast.FindAll({ param($n)
+    $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Write-Log' }, $true))
+$mergeCall = @($ast.FindAll({ param($n)
+    $n -is [System.Management.Automation.Language.CommandAst] -and
+    $n.GetCommandName() -eq 'Merge-JobSweepProfile' }, $true))
+Check 'Write-Log defined once'           $writeLogDef.Count 1
+Check 'collector calls the merge once'   $mergeCall.Count   1
+if ($writeLogDef.Count -eq 1 -and $mergeCall.Count -eq 1) {
+    Check 'Write-Log defined before merge' ($writeLogDef[0].Extent.StartOffset -lt $mergeCall[0].Extent.StartOffset) $true
+    $p = $mergeCall[0].Parent; $inTry = $false
+    while ($p) { if ($p -is [System.Management.Automation.Language.TryStatementAst]) { $inTry = $true; break }; $p = $p.Parent }
+    Check 'merge runs inside a try'        $inTry $true
+}
+
 Write-Host ("`nPASS {0}   FAIL {1}" -f $pass, $fail)
 if ($fail -gt 0) { exit 1 }
