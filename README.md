@@ -133,13 +133,14 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.2.2** (2026-10-20): changelog wording only.
 - **1.2.1** (2026-10-20): a profile that fails to load (missing file, unknown
   key) now reports that error and exits 2, instead of
   "Write-Log is not recognized".
 - **1.2.0** (2026-10-20): no personal path in the script. `OutputRoot` is a
   local profile key; with none set, output goes beside the script.
-- **1.1.0** (2026-10-20): default `-OutputRoot` is now
-  `%USERPROFILE%\OneDrive\Employment\Claude workspace`.
+- **1.1.0** (2026-10-20): default `-OutputRoot` changed to a new folder
+  (superseded by 1.2.0).
 - **1.0.0**: initial release.
 
 ## Licence

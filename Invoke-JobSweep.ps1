@@ -72,12 +72,12 @@
     Revised 2026-09-09: ADP WorkforceNow provider added (Lighthouse -- legal technology),
     plus information-governance and eDiscovery title keywords.
 
-    1.1.0 (2026-10-20): default OutputRoot moved from Employment\Claude accessible to
-    Employment\Claude workspace.
+    1.1.0 (2026-10-20): default OutputRoot changed to a new folder.
     1.2.0 (2026-10-20): no personal path in the script. OutputRoot is now a local
     profile key (%VAR% expanded); the fallback is the script's own folder.
     1.2.1 (2026-10-20): a profile that fails to load now reports its own error, logs
     beside the script and exits 2, instead of "Write-Log is not recognized".
+    1.2.2 (2026-10-20): changelog wording only.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -110,7 +110,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.2.1'
+$JobSweepVersion = '1.2.2'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
