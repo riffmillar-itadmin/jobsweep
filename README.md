@@ -146,6 +146,9 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.4** (2026-10-21): `CLAUDE.local.md` is gitignored, so personal
+  Claude Code instructions (local paths, your own workflow) stay out of the
+  repository.
 - **1.3.3** (2026-10-21): the tracking-board prompt gains three rules learned
   from retrofitting a real board: date added is never later than date
   applied, tags wrap so nothing is wider than a phone screen, and Claude

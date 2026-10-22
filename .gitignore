@@ -10,6 +10,9 @@ JobSweep.local.psd1
 # and will not travel.
 Test-JobSweepProfile.ps1
 
+# Personal Claude Code instructions -- local paths and workflow, not for publishing.
+CLAUDE.local.md
+
 # ---- run output ----
 Sweeps/
 _seen.json
