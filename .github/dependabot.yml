@@ -1,0 +1,13 @@
+# Keeps the GitHub Actions used in .github/workflows/ up to date.
+#
+# The repository is PowerShell with no package manifest, so the actions are its
+# only third-party dependencies. Dependabot alerts report known
+# vulnerabilities; this file is what makes Dependabot open pull requests that
+# bump the versions.
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

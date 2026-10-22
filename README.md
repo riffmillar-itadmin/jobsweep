@@ -146,6 +146,9 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.5** (2026-10-22): `SECURITY.md` explains how to report a
+  vulnerability privately, and `.github/dependabot.yml` has Dependabot check
+  the workflow's GitHub Actions for updates weekly.
 - **1.3.4** (2026-10-21): `CLAUDE.local.md` is gitignored, so personal
   Claude Code instructions (local paths, your own workflow) stay out of the
   repository.
