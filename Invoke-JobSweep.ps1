@@ -86,6 +86,9 @@
     7 on every push to main and every pull request.
     1.3.2 (2026-10-21): workflow moves to actions/checkout@v7 (Node 24); v4 ran on
     the deprecated Node 20.
+    1.3.3 (2026-10-21): build-tracking-board.md gains three rules from retrofitting a
+    real board -- date added never after date applied, tags wrap at phone width,
+    and a strong-match threshold check after scoring.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -118,7 +121,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.3.2'
+$JobSweepVersion = '1.3.3'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo

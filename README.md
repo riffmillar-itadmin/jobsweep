@@ -146,6 +146,10 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.3** (2026-10-21): the tracking-board prompt gains three rules learned
+  from retrofitting a real board: date added is never later than date
+  applied, tags wrap so nothing is wider than a phone screen, and Claude
+  checks the strong-match threshold after scoring and suggests a better one.
 - **1.3.2** (2026-10-21): the test workflow uses `actions/checkout@v7`, which
   runs on Node 24; v4 ran on the deprecated Node 20.
 - **1.3.1** (2026-10-21): GitHub Actions runs `Test-JobSweepFilters.ps1

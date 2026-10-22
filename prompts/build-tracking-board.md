@@ -72,6 +72,11 @@ companies_to_skip: []
 score_baseline: 60
 
 # Score at or above which "Strong match" is shown on the card (0-100).
+# Scores move in steps of (100 - score_baseline) / number of nice-to-haves,
+# and nice-to-haves most of your leads already meet (a commute you screen for,
+# a degree rule you screen for) lift nearly every card. If Strong match ends
+# up on most of the board it stops meaning anything -- Claude checks this
+# after scoring and suggests a value that marks about half.
 strong_match_threshold: 70
 
 # Extra filter buttons, in plain English: "Label: rule".
@@ -130,6 +135,10 @@ are state.
 - A card's identity is **`Source` + `ReqId`**. The sweep never reports the
   same requisition twice, but if two files contain one, keep the earlier.
 - **Date added** is the `<date>` in the file name the posting came from.
+  It can never be later than **Date applied**: when a card's dates disagree
+  -- typically one imported from an older tracker, where the first date
+  written down is a later event such as a repost -- use the applied date and
+  mark it approximate.
 - When the board already exists, read its current state first (the embedded
   data, or an Export file the user supplies) and only **add** cards that are
   not on it. Never move, re-score or delete an existing card, and never
@@ -292,8 +301,18 @@ or *Needs review* badges · date added · date applied (once set) · a link to
 the posting · a **Details** toggle with the reasons and the posting text ·
 a free-text **Notes** field that is saved · an **Edit** button.
 
+Pay text in particular can be a long sentence ("$90,000–$120,000 plus annual
+bonus, depending on experience"). Badges and tags must wrap their text rather than hold it on
+one line: nothing on the page may be wider than a 375-pixel phone screen.
+Check that width before finishing.
+
 ### Finish
 
 Tell the user where the board is, how many cards were added and how many are
 flagged Needs review, and remind them that LOCAL state lives in one browser
 until they Export it.
+
+Then check the threshold. Count the cards still in progress at each score
+step. If more than about half reach `strong_match_threshold`, say so, show
+the counts, and suggest the threshold that marks about half -- do not change
+it without the user's say-so.
