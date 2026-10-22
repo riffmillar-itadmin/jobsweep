@@ -146,6 +146,8 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.2** (2026-10-21): the test workflow uses `actions/checkout@v7`, which
+  runs on Node 24; v4 ran on the deprecated Node 20.
 - **1.3.1** (2026-10-21): GitHub Actions runs `Test-JobSweepFilters.ps1
   -BothEditions` on every push to `main` and every pull request.
 - **1.3.0** (2026-10-21): `prompts/build-tracking-board.md`, a Claude prompt
