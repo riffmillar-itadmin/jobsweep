@@ -6,7 +6,9 @@ and builds a board you use to track applications.
 
 **How to use it**
 
-1. Fill in **Part 1** below. Leave a line blank to skip it.
+1. Fill in **Part 1** below, in a copy rather than this file -- in the repo,
+   `prompts\build-tracking-board.local.md` is gitignored. Leave a line blank
+   to skip it.
 2. Give Claude this file and your `Sweeps\` folder:
    - **Claude Code** (or any Claude with file access): run it from the folder
      that holds `Sweeps\`, or say where that folder is.

@@ -5,7 +5,7 @@
 .DESCRIPTION
     Every silent-screening bug this toolset has had looked like "nothing was
     posted this week": \bmanager\b killing Software Asset Manager, a bare 'entra'
-    matching CENTRAl Kitchen, Washington DC passing on 'washington', a degree flag
+    matching CENTRAl Kitchen, a namesake city passing on a bare state name, a degree flag
     dropping a licensing req on a degree flag. None of them threw an error. A green
     exit code says the plumbing worked, not that the filter is right.
 
@@ -129,18 +129,28 @@ try { . $tmp } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction Silen
 $Config = Merge-JobSweepProfile -Defaults $Config -ProfilePath $ProfilePath
 Write-Host ("Profile: {0}" -f ($ProfilePath -join ' + ')) -ForegroundColor DarkGray
 
-$pass = 0; $fail = 0
+$pass = 0; $fail = 0; $skipped = 0
 function Check {
     param([string]$What, $Got, $Want)
     if ("$Got" -eq "$Want") { $script:pass++ }
     else { $script:fail++; Write-Host ("  FAIL  {0}`n        got  '{1}'`n        want '{2}'" -f $What, $Got, $Want) -ForegroundColor Red }
 }
 
+# EXAMPLE-GEOGRAPHY CHECKS name the FICTIONAL region in JobSweep.local.example.psd1
+# (Westmark, Harborview, Brookfield...). They hold only against that profile, so
+# against your own they are skipped and COUNTED, never silently passed. Your own
+# places belong in Test-JobSweepProfile.ps1, the private suite beside your profile.
+$exampleGeo = @($ProfilePath | Where-Object { (Split-Path $_ -Leaf) -eq 'JobSweep.local.example.psd1' }).Count -gt 0
+function CheckGeo {
+    param([string]$What, $Got, $Want)
+    if ($script:exampleGeo) { Check $What $Got $Want } else { $script:skipped++ }
+}
+
 Write-Host "`n-- LOCATION: onsite still screened as before --"
-Check 'Seattle onsite'        (Test-LocationMatch 'Seattle, WA').Ok            $true
-Check 'Bellevue onsite'       (Test-LocationMatch 'Bellevue, WA').Ok           $true
-Check 'Renton onsite DROPS'   (Test-LocationMatch 'Renton, WA').Ok             $false
-Check 'Tacoma onsite DROPS'   (Test-LocationMatch 'Tacoma, WA').Ok             $false
+CheckGeo 'Harborview onsite'        (Test-LocationMatch 'Harborview, WM').Ok            $true
+CheckGeo 'Brookfield onsite'       (Test-LocationMatch 'Brookfield, WM').Ok           $true
+Check 'Southgate onsite DROPS'   (Test-LocationMatch 'Southgate, WM').Ok             $false
+Check 'Port Allen onsite DROPS'   (Test-LocationMatch 'Port Allen, WM').Ok             $false
 Check 'Washington DC DROPS'   (Test-LocationMatch 'Washington, DC').Ok         $false
 Check 'US-DC- form DROPS'     (Test-LocationMatch 'US-DC-Washington').Ok       $false
 Check 'Austin onsite DROPS'   (Test-LocationMatch 'Austin, TX').Ok             $false
@@ -151,7 +161,7 @@ Check 'Remote - US'           (Test-LocationMatch 'Remote - US').Ok            $
 Check 'Remote Texas'          (Test-LocationMatch 'Remote, Austin TX').Ok      $true
 Check 'USA-Remote'            (Test-LocationMatch 'USA-Remote').Ok             $true
 Check 'Work from home'        (Test-LocationMatch 'Work From Home').Ok         $true
-Check 'remote beats commute'  (Test-LocationMatch 'Remote - Renton, WA').Ok    $true
+Check 'remote beats commute'  (Test-LocationMatch 'Remote - Southgate, WM').Ok    $true
 Check 'remote beats DC'       (Test-LocationMatch 'Remote - Washington, DC').Ok $true
 
 Write-Host "`n-- LOCATION: outside the US still out, remote or not --"
@@ -162,18 +172,18 @@ Check 'Remote UK DROPS'       (Test-LocationMatch 'Remote, London, UK').Ok     $
 Write-Host "`n-- LOCATION: multi-city reqs go to judgement, not the bin (added 2026-09-19) --"
 # Every one of these is a real string from sweep-2026-09-18-1923.
 Check '4-city req KEPT'       (Test-LocationMatch 'Atlanta, GA | Washington, DC | Chicago, IL | New York, NY').Ok $true
-Check 'multi-city req KEPT'    (Test-LocationMatch 'The Link | Austin, TX | Boston, MA | Washington, DC | Seattle, WA').Ok $true
+Check 'multi-city req KEPT'    (Test-LocationMatch 'Main Campus | Austin, TX | Boston, MA | Washington, DC | Harborview, WM').Ok $true
 Check 'N Locations KEPT'       (Test-LocationMatch '3 Locations').Ok               $true
 Check 'single DC still DROPS'  (Test-LocationMatch 'Washington, DC').Ok            $false
 Check 'single PaloAlto DROPS'  (Test-LocationMatch 'Palo Alto, CA').Ok             $false
 Check 'multi-city non-US DROPS' (Test-LocationMatch 'Toronto, Ontario | London, UK').Ok $false
 
 Write-Host "`n-- REMOTE VETTING --"
-Check 'WA excluded BLOCKS' (Test-RemoteFlags 'This role is remote. We are not able to hire in the following states: Washington, Colorado.').Block 'remote role excludes Washington residents'
-Check 'WA ineligible BLOCKS' (Test-RemoteFlags 'Residents of California and Washington are not eligible for this position.').Block 'remote role excludes Washington residents'
+CheckGeo 'state excluded BLOCKS' (Test-RemoteFlags 'This role is remote. We are not able to hire in the following states: Westmark, Colorado.').Block 'remote role excludes your state of residence'
+CheckGeo 'state ineligible BLOCKS' (Test-RemoteFlags 'Residents of California and Westmark are not eligible for this position.').Block 'remote role excludes your state of residence'
 Check 'clean posting no block' (Test-RemoteFlags 'Fully remote across the United States. Competitive pay.').Block ''
 $et = Test-RemoteFlags 'Candidates must provide coverage during Eastern Time business hours.'
-Check 'ET flagged'  ($et.Flags -join '|')  'CHECK: Eastern-hours coverage stated -- that is a 5-6am start here'
+Check 'ET flagged'  ($et.Flags -join '|')  'CHECK: Eastern-hours coverage stated -- confirm the start time in your time zone'
 $hy = Test-RemoteFlags 'Remote, but must reside within commuting distance of our Chicago office.'
 Check 'fake remote flagged' ($hy.Flags -join '|') 'CHECK: remote in name only -- requires living near an office'
 Check 'blank text safe' (Test-RemoteFlags '').Block ''
@@ -339,8 +349,8 @@ Check 'tuition cap not pay'   (Get-PayRange 'will pay up to $5,000 annually for 
 Check 'blank text safe'       (Get-PayRange '') ''
 
 # ---- REMOTE STATED IN THE TITLE, added 2026-09-21 ------------------------
-# The Option Care Health case: a fully remote req filed against the head office.
-Check 'OptionCare title rescue' (Test-LocationMatch 'Springfield, IL' 'Engineer, Endpoint - Remote').Ok $true
+# An employer filing a fully remote req against its out-of-state head office.
+Check 'head-office title rescue' (Test-LocationMatch 'Springfield, IL' 'Engineer, Endpoint - Remote').Ok $true
 Check 'title Remote, Sr SysAdmin' (Test-LocationMatch 'Chicago, IL' 'Sr Systems Administrator (Remote)').Ok $true
 Check 'title WFH'                (Test-LocationMatch 'Dallas, TX' 'Desktop Engineer - Work From Home').Ok $true
 # The narrowness of RemoteTitlePatterns is the point -- these must NOT be rescued.
@@ -351,7 +361,7 @@ Check 'plain title unaffected'   (Test-LocationMatch 'Palo Alto, CA' 'Systems Ad
 Check 'India beats remote title' (Test-LocationMatch 'Bengaluru, India' 'Endpoint Engineer - Remote').Ok  $false
 Check 'UK beats remote title'    (Test-LocationMatch 'London, UK' 'Systems Engineer (Remote)').Ok         $false
 # No title supplied -- every existing call path must behave exactly as before.
-Check 'no title, Seattle KEPT'   (Test-LocationMatch 'Seattle, WA').Ok                                    $true
+CheckGeo 'no title, Harborview KEPT'   (Test-LocationMatch 'Harborview, WM').Ok                                    $true
 Check 'no title, PaloAlto DROPS' (Test-LocationMatch 'Palo Alto, CA').Ok                                  $false
 Check 'blank title safe'         (Test-IsRemoteTitle '')                                                  $false
 Check 'null title safe'          (Test-IsRemoteTitle $null)                                               $false
@@ -365,82 +375,82 @@ Check 'Paralegal DROPS'       (Test-TitleMatch 'Senior Paralegal, Infrastructure
 Check 'Infra Engineer KEPT'   (Test-TitleMatch 'Infrastructure Engineer').Ok                       $true
 Check 'Cloud Engineer KEPT'   (Test-TitleMatch 'Cloud Engineer').Ok                                $true
 
-# ---- WORKSITE CHECK, added 2026-09-22, renamed from EastsideCheck 2026-10-12 ----
-# Bellevue and Redmond stay IN SCOPE -- the check rides along as a question.
+# ---- WORKSITE CHECK, added 2026-09-22, renamed 2026-10-12 ----
+# Brookfield and Millbrook stay IN SCOPE -- the check rides along as a question.
 # Asserted on the CHECK: prefix, never the note text: the note comes from the
 # profile, so the shipped suite and the private one see different wording.
-Check 'Bellevue still KEPT'    (Test-LocationMatch 'Bellevue, WA').Ok                         $true
-Check 'Redmond still KEPT'     (Test-LocationMatch 'Redmond, WA').Ok                          $true
-Check 'Bellevue carries check' ((Test-LocationMatch 'Bellevue, WA').Check -like 'CHECK:*')    $true
-Check 'Redmond carries check'  ((Test-LocationMatch 'Redmond, WA').Check -like 'CHECK:*')     $true
-# Seattle and plain-Washington matches must NOT carry it.
-Check 'Seattle no check'       ([bool](Test-LocationMatch 'Seattle, WA').Check)               $false
-Check 'bare WA no check'       ([bool](Test-LocationMatch 'Olympia Washington').Check)        $false
+CheckGeo 'Brookfield still KEPT'    (Test-LocationMatch 'Brookfield, WM').Ok                         $true
+CheckGeo 'Millbrook still KEPT'     (Test-LocationMatch 'Millbrook, WM').Ok                          $true
+CheckGeo 'Brookfield carries check' ((Test-LocationMatch 'Brookfield, WM').Check -like 'CHECK:*')    $true
+CheckGeo 'Millbrook carries check'  ((Test-LocationMatch 'Millbrook, WM').Check -like 'CHECK:*')     $true
+# Harborview and plain-state matches must NOT carry it.
+Check 'Harborview no check'       ([bool](Test-LocationMatch 'Harborview, WM').Check)               $false
+Check 'bare state no check'       ([bool](Test-LocationMatch 'Elmwood Westmark').Check)        $false
 # Remote returns before the include loop, so no worksite question applies.
-Check 'Remote Bellevue no chk' ([bool](Test-LocationMatch 'Remote - Bellevue, WA').Check)     $false
-Check 'Remote Bellevue KEPT'   (Test-LocationMatch 'Remote - Bellevue, WA').Ok                $true
+Check 'Remote Brookfield no chk' ([bool](Test-LocationMatch 'Remote - Brookfield, WM').Check)     $false
+Check 'Remote Brookfield KEPT'   (Test-LocationMatch 'Remote - Brookfield, WM').Ok                $true
 # Multi-city already goes to judgement, so it returns before the check too.
-Check 'multi-city no check'    ([bool](Test-LocationMatch 'Seattle, WA | Bellevue, WA').Check) $false
-# The Eastside cities that were ALREADY excluded must stay excluded.
-Check 'Kirkland still DROPS'   (Test-LocationMatch 'Kirkland, WA').Ok                         $false
-Check 'Bothell still DROPS'    (Test-LocationMatch 'Bothell, WA').Ok                          $false
-Check 'Issaquah still DROPS'   (Test-LocationMatch 'Issaquah, WA').Ok                         $false
-Check 'Renton still DROPS'     (Test-LocationMatch 'Renton, WA').Ok                           $false
+Check 'multi-city no check'    ([bool](Test-LocationMatch 'Harborview, WM | Brookfield, WM').Check) $false
+# The nearby cities that were ALREADY out of scope must stay out.
+Check 'Northbay still DROPS'   (Test-LocationMatch 'Northbay, WM').Ok                         $false
+Check 'Cedarton still DROPS'    (Test-LocationMatch 'Cedarton, WM').Ok                          $false
+Check 'Pinecrest still DROPS'   (Test-LocationMatch 'Pinecrest, WM').Ok                         $false
+Check 'Southgate still DROPS'     (Test-LocationMatch 'Southgate, WM').Ok                           $false
 # Substring safety: no false trigger on an unrelated string.
 Check 'no check on Palo Alto'  ([bool](Test-LocationMatch 'Palo Alto, CA').Check)             $false
 
 # ---- REGION CHECK, added 2026-10-12 --------------------------------------
 # A string that names a REGION names no city, so no city rule can judge it.
 # MEASURED before the fix, against both the example and the real profile:
-#   "Greater Seattle Area"  -> in scope, NO FLAG   (matched LocationInclude on
-#                              the substring 'seattle', while Everett and Tacoma
-#                              sit inside that region and are in CommuteExclude)
-#   "Eastside, WA"          -> DROPPED outright    (by a filter then named
-#                              EastsideCheck, which matched only city names)
+#   "Greater Harborview Area"  -> in scope, NO FLAG   (matched LocationInclude on
+#                              the substring 'harborview', while Maplewood and Port Allen
+#                              sit inside that region and are out of scope)
+#   "Eastshore, WM"          -> DROPPED outright    (by an earlier check that
+#                              matched only city names)
 # Two silent failures in opposite directions. Both are now questions.
-Check 'Greater Seattle KEPT'   (Test-LocationMatch 'Greater Seattle Area').Ok                 $true
-Check 'Greater Seattle flags'  ((Test-LocationMatch 'Greater Seattle Area').Check -like 'CHECK:*') $true
-Check 'Seattle Metro flags'    ((Test-LocationMatch 'Seattle Metropolitan Area').Check -like 'CHECK:*') $true
-Check 'Puget Sound KEPT'       (Test-LocationMatch 'Puget Sound Region').Ok                   $true
-Check 'Puget Sound flags'      ((Test-LocationMatch 'Puget Sound Region').Check -like 'CHECK:*') $true
-Check 'Eastside KEPT not drop' (Test-LocationMatch 'Eastside, WA').Ok                         $true
-Check 'Eastside flags'         ((Test-LocationMatch 'Eastside, WA').Check -like 'CHECK:*')    $true
-Check 'King County flags'      ((Test-LocationMatch 'King County, WA').Check -like 'CHECK:*') $true
-Check 'PNW KEPT not dropped'   (Test-LocationMatch 'Pacific Northwest').Ok                    $true
+CheckGeo 'Greater Harborview KEPT'   (Test-LocationMatch 'Greater Harborview Area').Ok                 $true
+CheckGeo 'Greater Harborview flags'  ((Test-LocationMatch 'Greater Harborview Area').Check -like 'CHECK:*') $true
+CheckGeo 'Harborview Metro flags'    ((Test-LocationMatch 'Harborview Metropolitan Area').Check -like 'CHECK:*') $true
+CheckGeo 'Harbor Bay KEPT'       (Test-LocationMatch 'Harbor Bay Region').Ok                   $true
+CheckGeo 'Harbor Bay flags'      ((Test-LocationMatch 'Harbor Bay Region').Check -like 'CHECK:*') $true
+CheckGeo 'Eastshore KEPT not drop' (Test-LocationMatch 'Eastshore, WM').Ok                         $true
+CheckGeo 'Eastshore flags'         ((Test-LocationMatch 'Eastshore, WM').Check -like 'CHECK:*')    $true
+CheckGeo 'Harbor County flags'      ((Test-LocationMatch 'Harbor County, WM').Check -like 'CHECK:*') $true
+CheckGeo 'North Coast KEPT'        (Test-LocationMatch 'North Coast').Ok                    $true
 
 # ORDERING IS LOAD-BEARING, so assert it rather than trusting the line order.
-# Before LocationInclude: 'Greater Seattle Area' contains 'seattle', which is in
+# Before LocationInclude: 'Greater Harborview Area' contains 'harborview', which is in
 # LocationInclude. If the region loop ran second this would read 'location in
 # scope' and carry no flag -- exactly the bug being fixed.
-Check 'region beats include'   ((Test-LocationMatch 'Greater Seattle Area').Reason -like 'region named*') $true
+CheckGeo 'region beats include'   ((Test-LocationMatch 'Greater Harborview Area').Reason -like 'region named*') $true
 # After CommuteExclude: a region phrase that also names an excluded city is still
 # dropped. Synthetic string -- 'washington dc' is in CommuteExclude in both the
 # example and the real profile, which is what makes this assertion portable.
-Check 'commute beats region'   (Test-LocationMatch 'Puget Sound / Washington DC').Ok          $false
+Check 'commute beats region'   (Test-LocationMatch 'Harbor Bay / Washington DC').Ok          $false
 # A plain city must not pick up a region flag.
-Check 'Seattle no region flag' ([bool](Test-LocationMatch 'Seattle, WA').Check)               $false
-Check 'Bellevue reason intact' ((Test-LocationMatch 'Bellevue, WA').Reason)        'location in scope'
+Check 'Harborview no region flag' ([bool](Test-LocationMatch 'Harborview, WM').Check)               $false
+CheckGeo 'Brookfield reason intact' ((Test-LocationMatch 'Brookfield, WM').Reason)        'location in scope'
 
 # ---- AN UNKNOWN PROFILE KEY STOPS THE RUN, added 2026-10-12 --------------
 # Merging is replace-by-key, so before this a stale key was carried into $Config
-# and never read. Renaming EastsideCheck -> WorksiteCheck without updating the
-# profile would have silently switched the worksite flag off. This is the guard
-# that makes any future rename fail loudly instead.
+# and never read. Renaming a key (as WorksiteCheck was, on 2026-10-12) without
+# updating the profile would have silently switched that filter off. This is the
+# guard that makes any future rename fail loudly instead.
 $badProfile = Join-Path ([IO.Path]::GetTempPath()) ("jobsweep-badkey-{0}.psd1" -f ([guid]::NewGuid().ToString('N')))
-Set-Content -LiteralPath $badProfile -Value "@{ EastsideCheck = @('bellevue') }" -Encoding utf8
+Set-Content -LiteralPath $badProfile -Value "@{ OldCityCheck = @('brookfield') }" -Encoding utf8
 $threw = $false; $msg = ''
 try   { Merge-JobSweepProfile -Defaults $Config -ProfilePath @($badProfile) | Out-Null }
 catch { $threw = $true; $msg = "$_" }
 Remove-Item -LiteralPath $badProfile -Force -ErrorAction SilentlyContinue
 Check 'stale key throws'       $threw                                                         $true
-Check 'error names the key'    ($msg -like '*EastsideCheck*')                                 $true
+Check 'error names the key'    ($msg -like '*OldCityCheck*')                                  $true
 Check 'error lists valid keys' ($msg -like '*WorksiteCheck*')                                 $true
 
 # ---- MALFORMED LOCATION IS NOT A SCREEN-OUT, added 2026-09-25 ------------
-# iCIMS served Cayuse Holdings' Sr Microsoft Engineer with the literal stub
-# "US-". It is neither null nor whitespace, so it fell through to the
-# out-of-scope return and a remote req at $75-85/hr was screened out.
-Check 'Cayuse US- KEPT'        (Test-LocationMatch 'US-').Ok                              $true
+# iCIMS served a remote engineering req with the literal stub "US-". It is
+# neither null nor whitespace, so it fell through to the out-of-scope return
+# and a strong remote lead was screened out.
+Check 'US- stub KEPT'          (Test-LocationMatch 'US-').Ok                              $true
 Check 'US- carries check'      ((Test-LocationMatch 'US-').Check -like 'CHECK: the location*') $true
 Check 'bare US KEPT'           (Test-LocationMatch 'US').Ok                               $true
 Check 'bare USA KEPT'          (Test-LocationMatch 'USA').Ok                              $true
@@ -454,63 +464,63 @@ Check 'blank still KEPT'       (Test-LocationMatch '').Ok                       
 Check 'blank carries no check' ([bool](Test-LocationMatch '').Check)                      $false
 # A stub must not swallow a real location that happens to start with a country code.
 Check 'US-DC- still DROPS'     (Test-LocationMatch 'US-DC-Washington').Ok                 $false
-Check 'US-WA-Seattle KEPT'     (Test-LocationMatch 'US-WA-Seattle').Ok                    $true
+CheckGeo 'US-WM-Harborview KEPT'     (Test-LocationMatch 'US-WM-Harborview').Ok                    $true
 Check 'US-TX-Austin DROPS'     (Test-LocationMatch 'US-TX-Austin').Ok                     $false
 Check 'PaloAlto no stub check' ([bool](Test-LocationMatch 'Palo Alto, CA').Check)         $false
-Check 'Seattle no stub check'  ([bool](Test-LocationMatch 'Seattle, WA').Check)           $false
+Check 'Harborview no stub check'  ([bool](Test-LocationMatch 'Harborview, WM').Check)           $false
 # A non-US stub is still a stub, not an exclusion -- the body decides.
 Check 'India NOT a stub'       (Test-LocationMatch 'Bengaluru, India').Ok                 $false
 
 # ---- WORKDAY bulletFields MAPPING, added 2026-09-25 ----------------------
-# Jackson Lewis posted to twelve cities including Seattle. The tenant put the
+# An employer posted to twelve cities including one in scope. The tenant put the
 # additional-locations list in bulletFields[0], the sweep wrote it into ReqId,
 # and the req was scored on New York alone. Second loss of this employer's
 # location list; the first was a WebFetch summary.
-Check 'reqid REQ- form'        (Test-IsRequisitionId 'REQ-0000133378')                    $true
-Check 'reqid JR form'          (Test-IsRequisitionId 'JR78095')                           $true
+Check 'reqid REQ- form'        (Test-IsRequisitionId 'REQ-0000100001')                    $true
+Check 'reqid JR form'          (Test-IsRequisitionId 'JR10001')                           $true
 Check 'reqid R- form'          (Test-IsRequisitionId 'R-12345')                           $true
 Check 'reqid year-seq form'    (Test-IsRequisitionId '2026-4572')                         $true
-Check 'city is NOT a reqid'    (Test-IsRequisitionId 'Seattle, WA')                       $false
-Check 'city list NOT a reqid'  (Test-IsRequisitionId 'Atlanta, GA | Seattle, WA')         $false
+Check 'city is NOT a reqid'    (Test-IsRequisitionId 'Harborview, WM')                       $false
+Check 'city list NOT a reqid'  (Test-IsRequisitionId 'Atlanta, GA | Harborview, WM')         $false
 Check 'N Locations NOT a reqid' (Test-IsRequisitionId '12 Locations')                     $false
 Check 'posted-ago NOT a reqid' (Test-IsRequisitionId '5 Days Ago')                        $false
 Check 'time type NOT a reqid'  (Test-IsRequisitionId 'Full time')                         $false
 Check 'bare city NOT a reqid'  (Test-IsRequisitionId 'New York')                          $false
 Check 'empty NOT a reqid'      (Test-IsRequisitionId '')                                  $false
 
-Check 'city,ST is a location'  (Test-LooksLikeLocationList 'Seattle, WA')                 $true
-Check 'piped list is location' (Test-LooksLikeLocationList 'Atlanta, GA | Seattle, WA')   $true
+Check 'city,ST is a location'  (Test-LooksLikeLocationList 'Harborview, WM')                 $true
+Check 'piped list is location' (Test-LooksLikeLocationList 'Atlanta, GA | Harborview, WM')   $true
 Check 'N Locations is location' (Test-LooksLikeLocationList '12 Locations')               $true
 Check 'Remote is location'     (Test-LooksLikeLocationList 'Remote')                      $true
-Check 'reqid NOT a location'   (Test-LooksLikeLocationList 'REQ-0000133378')              $false
+Check 'reqid NOT a location'   (Test-LooksLikeLocationList 'REQ-0000100001')              $false
 Check 'time type NOT location' (Test-LooksLikeLocationList 'Full time')                   $false
 
 # The defect itself: the twelve-city bullet must reach Location, not ReqId.
-$jl = Resolve-WorkdayBullets @('New York, NY | Boston, MA | Seattle, WA | Chicago, IL') 'New York, NY'
-Check 'JL reqid not polluted'  ($jl.ReqId -like '*Seattle*')                              $false
-Check 'JL Seattle recovered'   ($jl.Location -like '*Seattle, WA*')                       $true
-Check 'JL goes to judgement'   (Test-LocationMatch $jl.Location).Ok                       $true
-Check 'JL was DROPPED before'  (Test-LocationMatch 'New York, NY').Ok                     $false
+$multi = Resolve-WorkdayBullets @('New York, NY | Boston, MA | Harborview, WM | Chicago, IL') 'New York, NY'
+Check '12-city reqid clean'    ($multi.ReqId -like '*Harborview*')                           $false
+Check '12-city city recovered' ($multi.Location -like '*Harborview, WM*')                    $true
+Check '12-city to judgement'   (Test-LocationMatch $multi.Location).Ok                       $true
+Check '12-city DROPPED before' (Test-LocationMatch 'New York, NY').Ok                        $false
 
 # The ordinary single-location shape must be completely unchanged.
-$one = Resolve-WorkdayBullets @('JR78095') 'Seattle, WA'
-Check 'single reqid kept'      $one.ReqId                                                 'JR78095'
-Check 'single location kept'   $one.Location                                              'Seattle, WA'
+$one = Resolve-WorkdayBullets @('JR10001') 'Harborview, WM'
+Check 'single reqid kept'      $one.ReqId                                                 'JR10001'
+Check 'single location kept'   $one.Location                                              'Harborview, WM'
 
 # Mixed bullets: take the id, fold the places, drop everything else.
-$mix = Resolve-WorkdayBullets @('JR78095','Atlanta, GA | Seattle, WA','Full time','5 Days Ago') 'New York, NY'
-Check 'mixed picks the reqid'  $mix.ReqId                                                 'JR78095'
-Check 'mixed folds the places' $mix.Location                        'New York, NY | Atlanta, GA | Seattle, WA'
+$mix = Resolve-WorkdayBullets @('JR10001','Atlanta, GA | Harborview, WM','Full time','5 Days Ago') 'New York, NY'
+Check 'mixed picks the reqid'  $mix.ReqId                                                 'JR10001'
+Check 'mixed folds the places' $mix.Location                        'New York, NY | Atlanta, GA | Harborview, WM'
 Check 'mixed drops the noise'  ($mix.Location -like '*Full time*')                        $false
 
 # Nothing usable, and no duplication of a location the row already had.
-$none = Resolve-WorkdayBullets @() 'Seattle, WA'
+$none = Resolve-WorkdayBullets @() 'Harborview, WM'
 Check 'empty bullets no reqid' ([bool]$none.ReqId)                                        $false
-Check 'empty bullets keep loc' $none.Location                                             'Seattle, WA'
-$dup = Resolve-WorkdayBullets @('Seattle, WA') 'Seattle, WA'
-Check 'no duplicated location' $dup.Location                                              'Seattle, WA'
-$blank = Resolve-WorkdayBullets @('Puyallup, WA') ''
-Check 'blank loc takes bullet' $blank.Location                                            'Puyallup, WA'
+Check 'empty bullets keep loc' $none.Location                                             'Harborview, WM'
+$dup = Resolve-WorkdayBullets @('Harborview, WM') 'Harborview, WM'
+Check 'no duplicated location' $dup.Location                                              'Harborview, WM'
+$blank = Resolve-WorkdayBullets @('Fernhill, WM') ''
+Check 'blank loc takes bullet' $blank.Location                                            'Fernhill, WM'
 Check 'recovered loc screens'  (Test-LocationMatch $blank.Location).Ok                    $false
 
 # ---- COMPLIANCE TITLE NEEDS IT CONTEXT, added 2026-09-30 -----------------
@@ -601,5 +611,6 @@ if ($writeLogDef.Count -eq 1 -and $mergeCall.Count -eq 1) {
     Check 'merge runs inside a try'        $inTry $true
 }
 
-Write-Host ("`nPASS {0}   FAIL {1}" -f $pass, $fail)
+$skipNote = if ($skipped -gt 0) { "   SKIPPED $skipped example-geography checks (not the example profile -- cover your own places in Test-JobSweepProfile.ps1)" } else { '' }
+Write-Host ("`nPASS {0}   FAIL {1}{2}" -f $pass, $fail, $skipNote)
 if ($fail -gt 0) { exit 1 }

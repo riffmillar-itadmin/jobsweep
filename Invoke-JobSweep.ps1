@@ -69,7 +69,7 @@
         1  finished, but with warnings or a provider failure -- read the log
         2  aborted on an unhandled error -- read the log
 
-    Revised 2026-09-09: ADP WorkforceNow provider added (Lighthouse -- legal technology),
+    Revised 2026-09-09: ADP WorkforceNow provider added (for a legal-technology employer),
     plus information-governance and eDiscovery title keywords.
 
     1.1.0 (2026-10-20): default OutputRoot changed to a new folder.
@@ -97,6 +97,9 @@
     log a Write-Verbose reason; PSScriptAnalyzerSettings.psd1 documents the rules.
     1.3.7 (2026-10-22): Test-JobSweepLint.ps1 lints the repo as CI does; a lint job
     now runs it on 5.1 and 7 and fails on errors and warnings.
+    1.3.8 (2026-10-22): privacy pass. Example geography is a fictional state;
+    a blocked remote posting no longer names Washington; iCIMS location parsing
+    covers every US state; README section for the tracking-board prompt.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -129,7 +132,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.3.7'
+$JobSweepVersion = '1.3.8'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -166,9 +169,9 @@ $Config = @{
 
     # ---- REMOTE STATED IN THE TITLE, added 2026-09-21.
     #
-    # Option Care Health files every req against its Springfield, IL head office,
-    # including "Engineer, Endpoint - Remote". The location field said Springfield
-    # and nothing else, so the posting died on "location out of scope" -- a fully
+    # A healthcare employer files every req against its out-of-state head office,
+    # including "Engineer, Endpoint - Remote". The location field named the head
+    # office and nothing else, so the posting died on "location out of scope" -- a fully
     # remote req squarely in the target title family, screened out by a head-office
     # address. Employers on Workday do this routinely; the title is the only place
     # the remote arrangement appears in the list payload.
@@ -181,7 +184,7 @@ $Config = @{
     # mean a work arrangement belong here.
     #
     # Measured before adding: across the screened lists of 09-09, 09-18 and 09-21
-    # (800 rows) this rescues exactly 1 posting -- the Option Care endpoint req --
+    # (800 rows) this rescues exactly 1 posting -- the endpoint req above --
     # and creates 0 false positives. The other title matches were all "Virtual
     # Family Nurse Practitioner" variants, which die on the 'nurse' exclude before
     # the location screen ever runs.
@@ -192,8 +195,8 @@ $Config = @{
     # ---- DEVELOPER-IN-DISGUISE SCREEN, added 2026-09-10.
     #
     # Two leads in a fortnight carried a systems title over a software-engineering
-    # job: Overland AI's "Junior Systems Administrator" (Python and C++) and UW's
-    # "Senior Systems Engineer" REQ-0000134242-1. TitleExclude cannot catch these --
+    # job: a startup's "Junior Systems Administrator" (Python and C++) and a
+    # university's "Senior Systems Engineer". TitleExclude cannot catch these --
     # the title is one the include list actively wants -- so the posting TEXT has to.
     #
     # Scored, not absolute. A sysadmin posting legitimately mentions scripting and
@@ -240,10 +243,10 @@ $Config = @{
     # Remote reqs fail in ways an onsite req does not, and the location string never
     # says so -- it has to come out of the posting text.
 
-    # ABSOLUTE. A remote role that will not hire in Washington is not a lead, in the
+    # ABSOLUTE. A remote role that will not hire in your state is not a lead, in the
     # same class as the driver's-licence requirement.
     RemoteFlag = [ordered]@{
-        'CHECK: Eastern-hours coverage stated -- that is a 5-6am start here' =
+        'CHECK: Eastern-hours coverage stated -- confirm the start time in your time zone' =
             @('\beastern (?:time|standard time|daylight time)\b','\bET\s+hours\b','\bEST\b','\bEDT\b','east coast hours')
         'CHECK: remote in name only -- requires living near an office' =
             @('within\s+commuting\s+distance','must\s+resid[e]?\s+(?:in|within|near)','commutable\s+distance',
@@ -261,13 +264,13 @@ $Config = @{
 
     # Cities that are only PARTLY in scope. A posting carries a city and never a
     # street address, so these cannot be screened either way -- they are flagged.
-    # Renamed from EastsideCheck on 2026-10-12: that name described a REGION while
-    # the values were CITIES and the question asked was a street address.
+    # Renamed on 2026-10-12: the old name described a REGION while the values
+    # were CITIES and the question asked was a street address.
     WorksiteCheck     = @()
     WorksiteCheckNote = ''
 
-    # Phrases that name a REGION rather than a city -- "Greater Seattle Area",
-    # "Puget Sound". No city-level rule can judge these, in either direction.
+    # Phrases that name a REGION rather than a city -- "Greater <City> Area",
+    # "<Bay> Region". No city-level rule can judge these, in either direction.
     RegionCheck       = @()
     RegionCheckNote   = ''
 
@@ -660,7 +663,7 @@ function Test-IsRequisitionId {
     if ($v -notmatch '\d') { return $false }
     if (@($v -split '\s+').Count -gt 3) { return $false }
     # "5 Days Ago", "2 Locations", "Posted Today" all carry a digit and fit in three
-    # words, so the shape test alone is not enough to tell them from JR78095.
+    # words, so the shape test alone is not enough to tell them from JR10001.
     if ($v -match '(?i)\b(days?|hours?|weeks?|months?|ago|posted|locations?|remote|onsite|hybrid|full|part|time)\b') { return $false }
     return $true
 }
@@ -686,7 +689,7 @@ function Resolve-WorkdayBullets {
        Returns @{ ReqId=<string or ''>; Location=<string> }. Added 2026-09-25.
 
        Kept as its own function so the filter suite can test the real mapping rather
-       than a copy of it -- this is the code path that lost Jackson Lewis. #>
+       than a copy of it -- this is the code path that lost a twelve-city req. #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '',
         Justification = 'Named for the Workday bulletFields array it resolves; the filter suite calls it by this name.')]
     param([object[]]$Bullets, [string]$Location)
@@ -715,11 +718,11 @@ function Test-LocationMatch {
 
     # A MALFORMED LOCATION IS UNKNOWN, NOT OUT OF AREA. Added 2026-09-25.
     #
-    # iCIMS served Cayuse Holdings' Sr Microsoft Engineer with the literal stub "US-".
-    # That is not null and not whitespace, so it fell past every check below to the
-    # out-of-scope return at the bottom and the req was screened out as though it named
-    # a city in another state. It was remote, $75-85/hr, and dead centre on the
-    # requirements -- the best lead of that week, lost to a punctuation artefact.
+    # iCIMS served a remote engineering req with the literal stub "US-". That is not
+    # null and not whitespace, so it fell past every check below to the out-of-scope
+    # return at the bottom and the req was screened out as though it named a city in
+    # another state. It was remote and dead centre on the requirements -- the best
+    # lead of that week, lost to a punctuation artefact.
     #
     # A string that names no place cannot disqualify one. Bare-country and placeholder
     # values go to the Remote flag and the posting body with a CHECK attached, the same
@@ -765,12 +768,12 @@ function Test-LocationMatch {
     # A REGION IS A QUESTION, NOT AN ANSWER. Added 2026-10-12 after measuring the
     # real filter against real strings rather than reasoning about it.
     #
-    # "Greater Seattle Area" matched LocationInclude on the substring 'seattle'
-    # and sailed through with NO FLAG -- while CommuteExclude correctly rejects
-    # Everett and Tacoma, which are INSIDE that region. An employer naming the
-    # city got screened; the same employer naming the region got waved through.
-    # The mirror case was worse: "Eastside, WA" matched nothing and was DROPPED
-    # outright -- by a filter that was at the time called EastsideCheck.
+    # "Greater <City> Area" matched LocationInclude on the city's own name and
+    # sailed through with NO FLAG -- while CommuteExclude correctly rejects the
+    # outlying cities INSIDE that region. An employer naming one of those cities got
+    # screened; the same employer naming the region got waved through. The mirror
+    # case was worse: a sub-region name ("Eastshore, ST" in the tests) matched
+    # nothing and was DROPPED outright by an earlier, city-only check.
     #
     # Two silent failures in opposite directions, which is the class this toolset
     # exists to prevent. Ordering is load-bearing: AFTER CommuteExclude, because a
@@ -863,7 +866,7 @@ function Test-RemoteFlags {
     if ([string]::IsNullOrWhiteSpace($Text)) { return $result }
 
     foreach ($p in $Config.RemoteBlock) {
-        if ($Text -match "(?is)$p") { $result.Block = 'remote role excludes Washington residents'; return $result }
+        if ($Text -match "(?is)$p") { $result.Block = 'remote role excludes your state of residence'; return $result }
     }
     foreach ($label in $Config.RemoteFlag.Keys) {
         foreach ($p in $Config.RemoteFlag[$label]) {
@@ -973,7 +976,7 @@ function Get-WorkdayJobs {
         $newThisPage = 0
         foreach ($j in $postings) {
             # externalPath is BOTH the dedupe key and the URL. A bare access throws under
-            # StrictMode, and on 2026-09-17 NVIDIA served a posting with no externalPath
+            # StrictMode, and on 2026-09-17 a large tenant served a posting with no externalPath
             # roughly 1,700 rows in -- one bad row killed the ENTIRE tenant with
             # "The property 'externalPath' cannot be found on this object."
             # A posting with no path cannot be linked or deduped, so skip the row and
@@ -987,8 +990,8 @@ function Get-WorkdayJobs {
             if ($j.PSObject.Properties.Name -contains 'locationsText') { $loc = $j.locationsText }
             # One large health-system tenant returns an EMPTY locationsText on all 1,454
             # of its reqs, so the
-            # location screen never ran for them at all and Puyallup clinical roles sailed
-            # through. The location is in the URL: /job/Puyallup-Washington/<slug>_JR78095.
+            # location screen never ran for them at all and clinical roles in out-of-scope
+            # cities sailed through. The location is in the URL: /job/<City>-<State>/<slug>_<ReqId>.
             # Recover it from there whenever the field itself is blank.
             if ([string]::IsNullOrWhiteSpace($loc)) {
                 $segs = @($path -split '/' | Where-Object { $_ -ne '' })
@@ -1001,10 +1004,10 @@ function Get-WorkdayJobs {
             #
             # On a multi-location req a tenant can put the additional-locations list in the
             # first bullet. Taking bulletFields[0] on faith wrote that list into ReqId and
-            # left locationsText holding the primary city alone: Jackson Lewis posted to
-            # twelve cities INCLUDING SEATTLE and the req was screened on New York. Second
-            # time that employer's location list has gone missing -- the first was the
-            # WebFetch summary that dropped the Washington band and 12 of 13 locations.
+            # left locationsText holding the primary city alone: an employer posted to
+            # twelve cities INCLUDING ONE IN SCOPE and the req was screened on New York.
+            # Second time that employer's location list has gone missing -- the first was
+            # a WebFetch summary that dropped the state pay band and 12 of 13 locations.
             #
             # Take the first bullet that actually looks like an id, and fold the ones that
             # look like places back into the location string so the multi-location branch of
@@ -1022,10 +1025,10 @@ function Get-WorkdayJobs {
             $newThisPage++
             # PUBLIC URL SHAPE DIFFERS BY WORKDAY HOSTING MODEL, and getting it wrong ships a
             # dead link on every card. A dedicated tenant host (<tenant>.wdN.myworkdayjobs.com)
-            # serves /<Site>/job/... , but the SHARED host (wdN.myworkdaysite.com, which is what
-            # UW uses) serves /recruiting/<tenant>/<site-lowercase>/job/... and 404s to a
-            # maintenance page otherwise. Found 2026-09-18 when every UW card on the board
-            # turned out to be unclickable.
+            # serves /<Site>/job/... , but the SHARED host (wdN.myworkdaysite.com, which some
+            # universities use) serves /recruiting/<tenant>/<site-lowercase>/job/... and 404s
+            # to a maintenance page otherwise. Found 2026-09-18 when every card from one such
+            # tenant turned out to be unclickable.
             if ($Src.WdHost -match 'myworkdaysite\.com') {
                 $publicUrl = "$($Src.WdHost)/recruiting/$($Src.Tenant.ToLower())/$($Src.Site.ToLower())" + $path
             } else {
@@ -1265,16 +1268,28 @@ function Add-IcimsDetail {
     try {
         $text = Convert-HtmlToText (Invoke-Html $Posting.DetailPath)
         $Posting.Content = $text
-        # iCIMS renders locations either as "US-WA-Seattle" or as "Seattle, Washington".
+        # iCIMS renders locations either as "US-TX-Austin" or as "Austin, Texas".
         # If neither matches, the location stays blank and the posting survives the screen
         # for a human to judge -- a wrongly screened lead costs more than a wrongly kept one.
+        # Any US state or DC, by name or two-letter code -- this list once named five
+        # western states only, which left iCIMS locations elsewhere unparsed.
+        $usState = 'Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|' +
+                   'District of Columbia|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|' +
+                   'Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|' +
+                   'Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|' +
+                   'New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|' +
+                   'Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|' +
+                   'Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming|' +
+                   'AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|' +
+                   'MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|' +
+                   'WV|WI|WY'
         if ($text -match 'US-([A-Z]{2})-([A-Za-z .''\-]+)') {
             $Posting.Location = "$($Matches[2].Trim()), $($Matches[1])"
-        } elseif ($text -match '(?m)^\s*([A-Z][A-Za-z .''\-]{2,30}),\s*(Washington|Oregon|California|Idaho|Alaska|WA|OR|CA|ID|AK)\s*$') {
+        } elseif ($text -match "(?m)^\s*([A-Z][A-Za-z .'\-]{2,30}),\s*($usState)\s*$") {
             $Posting.Location = "$($Matches[1].Trim()), $($Matches[2])"
         } elseif ($text -match '(?ms)^\s*Location\s*\r?\n\s*([^\r\n]{2,60}?)\s*$') {
             # iCIMS renders a bare "Location" label with the value on the next line --
-            # this is what catches "Remote" and "Madison Valley, Seattle"
+            # this is what catches "Remote" and "Downtown, Austin"
             $Posting.Location = $Matches[1].Trim()
         }
         $Posting.Pay          = Get-PayRange $text
@@ -1696,14 +1711,14 @@ if (-not $SkipDetail) {
             $p.Reason = ($p.Reason + ' | CHECK physical: ' + (($physChk | ForEach-Object { $_.Why }) -join '; ')).Trim(' |')
         }
         # A degree flag NO LONGER DROPS the lead. Get-DegreeFlag reads prose and can be
-        # wrong, and the one it killed on 2026-09-09 -- an IT Contracts &
-        # Licensing Specialist III, in-region and in the target title family -- is exactly
+        # wrong, and the one it killed on 2026-09-09 -- a contracts-and-licensing
+        # req, in-region and in the target title family -- is exactly
         # the lead that must not disappear into screened.csv. Flag it and let a human read it.
         if ($p.Degree -eq 'hard') { $p.Reason = ($p.Reason + ' | CHECK: degree stated with no equivalency clause').Trim(' |') }
 
-        # Developer-in-disguise, added 2026-09-10 after UW's REQ-0000134242-1
-        # "Senior Systems Engineer" turned out to be a developer post -- the second
-        # in a fortnight after Overland AI's "Junior Systems Administrator".
+        # Developer-in-disguise, added 2026-09-10 after a university's "Senior Systems
+        # Engineer" req turned out to be a developer post -- the second in a
+        # fortnight after a startup's "Junior Systems Administrator".
         $dev = @(Test-DeveloperRole $p.Content)
         if ($dev.Count -gt 0) {
             $p.Reason = ($p.Reason + ' | CHECK: reads like a software engineering role (' + ($dev -join '; ') + ')').Trim(' |')
@@ -1732,7 +1747,7 @@ if (-not $SkipDetail) {
 
         # Remote vetting, added 2026-09-10 when national remote came back in scope.
         # Runs on postings whose LOCATION or TITLE reads remote (title added
-        # 2026-09-21) -- an onsite Seattle req that happens to mention Eastern time
+        # 2026-09-21) -- an onsite in-region req that happens to mention Eastern time
         # is not a remote-hours problem, but a req titled "- Remote" and filed
         # against a head office is, and needs the same residency screen.
         if ((Test-IsRemote $p.Location) -or (Test-IsRemoteTitle $p.Title)) {

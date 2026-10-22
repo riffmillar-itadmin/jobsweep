@@ -47,13 +47,13 @@ TitleInclude = @(
     # 'service engineer' (see the Sources block) and TitleInclude then discarded
     # every result -- Microsoft's Service Engineering discipline had no target
     # keyword at all. Proved on sweep-2026-09-23-0920, which collected and then
-    # dropped "Platform Service Engineer [Service Engineering]" in Redmond -- a real
+    # dropped "Platform Service Engineer [Service Engineering]" -- a real
     # posting that then had to be found and read by hand. Same
     # failure shape as the 2026-09-19 additions: collected, then thrown away.
     # Measured over five runs (2026-09-18 to -24; 1022 screened rows, 397 of them
     # dropped for no target keyword) the five patterns below cost +6 rows, 0.6%:
     #   'service engineer'  +1  the Platform Service Engineer above
-    #   'site reliability'  +1  Senior Site Reliability Engineer, Redmond
+    #   'site reliability'  +1  Senior Site Reliability Engineer
     #   'cloud operations'  +0  names the CO+I org; free insurance
     #   '\bsre\b'           +0  free insurance
     # 'data\s?cent' was added here the same day and REMOVED again hours later. It
@@ -105,7 +105,7 @@ TitleExclude = @(
     'operations research',
     # Legal, added 2026-09-21. The 'infrastructure' keyword added two days
     # earlier produced its first false positive on its first live run:
-    # Anthropic's "Compute & Infrastructure Counsel, Real Estate" is a lawyer.
+    # an AI company's "Compute & Infrastructure Counsel, Real Estate" is a lawyer.
     '\bcounsel\b','counsel,','attorney','paralegal',
     # LEVEL, added 2026-10-01. "Principal Hardware Systems Engineer" reached the
     # candidate list on 'systems engineer' and had to be declined by hand -- the
@@ -129,9 +129,9 @@ TitleExclude = @(
 #
 #   LocationExclude   always disqualifies, remote or not. Outside the US.
 #   CommuteExclude    disqualifies an ONSITE posting only. These are the
-#                     Washington suburbs and the other-Washington traps; a
-#                     genuinely remote req in Renton is a remote req, so the
-#                     commute list must not touch it.
+#                     suburbs you won't commute to and namesake traps such as
+#                     Washington, DC; a genuinely remote req filed under one of
+#                     them is a remote req, so the commute list must not touch it.
 #   LocationInclude   an onsite posting must match one of these.
 #
 # A posting whose location says remote skips CommuteExclude and LocationInclude

@@ -4,16 +4,26 @@
 #  Published, it is a map of your job search. Confirm it is ABSENT from a
 #  commit -- `git status` and the full diff -- not merely present-and-ignored.
 # ---------------------------------------------------------------------------
-JobSweep.local.psd1
+#  Wildcards, so a copy ("JobSweep.local - Copy.psd1") is covered too; the
+#  shipped example is the one exception.
+JobSweep.local*.psd1
+!JobSweep.local.example.psd1
 
 # Your own profile assertions. Every line is a statement about where you will
 # and will not travel.
-Test-JobSweepProfile.ps1
+Test-JobSweepProfile*.ps1
 
-# Personal Claude Code instructions -- local paths and workflow, not for publishing.
-CLAUDE.local.md
+# Personal copies: Claude Code instructions (CLAUDE.local.md) and filled-in
+# prompts such as prompts/build-tracking-board.local.md hold your paths,
+# workflow and criteria -- not for publishing.
+*.local*.md
+
+# A local tracking board holds your notes and stages. It is written beside
+# Sweeps\, which is this folder when no OutputRoot is set.
+job-board*.html
 
 # ---- run output ----
+logs/
 Sweeps/
 _seen.json
 *.log

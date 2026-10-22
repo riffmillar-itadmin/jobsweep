@@ -30,9 +30,12 @@ LocationExclude = @(
 # NOT travel to; a bare state or metro name in LocationInclude lets everything
 # else through.
 CommuteExclude = @(
-    # 'washington, dc' belongs HERE rather than in LocationExclude, because a
-    # genuinely remote posting filed under DC is still a remote posting. Keep the
-    # US-xx- form too: several ATS platforms emit location that way.
+    # NAMESAKES. If your state shares its name with a city elsewhere, a bare state
+    # name in LocationInclude lets that city through -- Washington and Washington,
+    # DC are the classic pair. Name the namesake HERE rather than in
+    # LocationExclude, because a genuinely remote posting filed under it is still
+    # a remote posting. Keep the US-xx- form too: several ATS platforms emit
+    # location that way. Harmless if your state has no namesake.
     'washington, dc','washington dc','district of columbia','us-dc-',
     # Replace the rest with the suburbs and satellite cities YOU will not travel
     # to. A bare state name in LocationInclude lets every city through unless it
@@ -43,10 +46,12 @@ CommuteExclude = @(
 
 # An ONSITE posting must match one of these. Keep it tight: a bare state name
 # means any city in that state passes unless CommuteExclude names it.
-# Worked example: a Seattle-area search. A city name here is not sensitive --
-# your commute boundary below and your employer list are the private parts.
+#
+# Worked example: Westmark (WM) is a FICTIONAL state, and every town in this
+# file is invented. Replace them all with your own. Harborview is the core
+# city; Brookfield and Millbrook are only partly in reach (see WorksiteCheck).
 LocationInclude = @(
-    'seattle','bellevue','redmond','washington','wa,'
+    'harborview','brookfield','millbrook','westmark','wm,'
 )
 
 # ---- WORKSITE CHECK: cities too coarse to decide from (optional) ----
@@ -58,12 +63,12 @@ LocationInclude = @(
 #
 # WorksiteCheckNote is the question you want asked. Leave it blank for a generic
 # one. Leave the list empty if your whole metro is either in or out.
-WorksiteCheck = @('bellevue','redmond')
+WorksiteCheck = @('brookfield','millbrook')
 WorksiteCheckNote = 'confirm the worksite is within reach of your usual transit route'
 
 # ---- REGION CHECK: strings that name no city at all (optional) ----
 #
-# "Greater Seattle Area" is not a city, and no city rule can judge it. Left
+# "Greater Harborview Area" is not a city, and no city rule can judge it. Left
 # alone it either matches LocationInclude on a substring and passes with no
 # flag, or matches nothing and is dropped -- both silently wrong, in opposite
 # directions. Phrases listed here are flagged instead, whichever way they lean.
@@ -71,20 +76,20 @@ WorksiteCheckNote = 'confirm the worksite is within reach of your usual transit 
 # This runs AFTER CommuteExclude (a region naming an excluded city is fairly
 # dropped) and BEFORE LocationInclude (so a substring cannot pre-empt it).
 RegionCheck = @(
-    'greater seattle','seattle metropolitan','seattle metro','puget sound',
-    'eastside','greater eastside','king county','western washington',
-    'pacific northwest'
+    'greater harborview','harborview metropolitan','harborview metro','harbor bay',
+    'eastshore','greater eastshore','harbor county','western westmark',
+    'north coast'
 )
 RegionCheckNote = 'a region was named instead of a city -- confirm which office this role sits at'
 
 # What makes a remote posting's text read as "not in your state after all".
-# These are regexes run against the posting body. Replace 'washington' with the
+# These are regexes run against the posting body. Replace 'westmark' with the
 # state you live in -- this is the clause that hides inside a Remote listing.
 RemoteBlock = @(
-    'not\s+(?:currently\s+)?(?:able\s+to\s+)?(?:hire|employ|consider)[^.]{0,80}washington',
-    '(?:excluding|except|not\s+available\s+in|unable\s+to\s+hire\s+in)[^.]{0,80}\bwashington\b',
-    'washington[^.]{0,40}(?:not\s+eligible|are\s+excluded|is\s+excluded)',
-    'residents?\s+of[^.]{0,60}washington[^.]{0,40}(?:not|ineligible)'
+    'not\s+(?:currently\s+)?(?:able\s+to\s+)?(?:hire|employ|consider)[^.]{0,80}westmark',
+    '(?:excluding|except|not\s+available\s+in|unable\s+to\s+hire\s+in)[^.]{0,80}\bwestmark\b',
+    'westmark[^.]{0,40}(?:not\s+eligible|are\s+excluded|is\s+excluded)',
+    'residents?\s+of[^.]{0,60}westmark[^.]{0,40}(?:not|ineligible)'
 )
 
 # ---- PHYSICAL REQUIREMENTS ----

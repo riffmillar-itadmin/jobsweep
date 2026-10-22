@@ -20,8 +20,9 @@ outside: *nothing was posted this week.* None of them threw an error.
   Stems that are also substrings are anchored with `\b`.
 - A bare `licens` matched five clinical reqs — *Licensed Child, Youth & Family
   Therapist* — so it is anchored to the software sense.
-- `washington` in the include list passed **Washington, DC**, which is why DC
-  is a *commute* exclusion rather than a country one.
+- A bare state name in the include list passes that state's namesakes elsewhere
+  (`washington` lets **Washington, DC** through), which is why a namesake is a
+  *commute* exclusion rather than a country one.
 - A malformed location field, the literal string `US-`, fell past every check
   to "location out of scope" and dropped the best lead of that week.
 
@@ -36,7 +37,7 @@ That is what the test suite is for.
 | `JobSweep.targeting.psd1` | ✅ | **What counts as a job worth looking at.** Title rules only — this describes a search, not a person. |
 | `JobSweep.local.psd1` | ⛔ **gitignored** | **Where you will go and who you are watching.** Geography, commute boundary, remote rules, and the employer list. |
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
-| `JobSweep.local.example.psd1` | ✅ | A worked geography with placeholder employers. Copy it. |
+| `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 258 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -61,7 +62,9 @@ Copy-Item JobSweep.local.example.psd1 JobSweep.local.psd1
 #    ...edit it: LocationInclude, CommuteExclude, real ATS tokens in Sources,
 #    and optionally OutputRoot.
 
-# 3. Point the suite at your profile to see what your own rules do.
+# 3. Point the suite at your profile to see what your own rules do. Checks that
+#    name the example's fictional towns are skipped and counted; assert your own
+#    places in a Test-JobSweepProfile.ps1 beside your profile (also gitignored).
 .\Test-JobSweepFilters.ps1 -ProfilePath @('.\JobSweep.targeting.psd1', '.\JobSweep.local.psd1')
 
 # 4. Sweep.
@@ -97,10 +100,47 @@ with `CHECK:` rather than deciding. `WorksiteCheck` covers a city that is only
 partly in scope: a posting carries a city and never a street address, so when
 half a city is reachable and half is not, the question travels with the posting
 instead of the posting disappearing. `RegionCheck` covers a string that names no
-city at all — *"Greater Seattle Area"*, *"Puget Sound"*. Left alone those either
+city at all — *"Greater Metro Area"*, *"Bay Region"*. Left alone those either
 match `LocationInclude` on a substring and pass unflagged, or match nothing and
 are dropped; either way the screening is silently wrong, so they are flagged in
 both directions.
+
+## Tracking board (optional)
+
+The sweep finds and screens postings; deciding which ones are worth an
+application is a judgement call. [`prompts/build-tracking-board.md`](prompts/build-tracking-board.md)
+is a prompt for Claude that makes that call against **your** criteria and turns
+the result into a board you track applications on.
+
+```powershell
+# Work on a copy: your criteria are personal, and *.local.md is gitignored.
+Copy-Item prompts\build-tracking-board.md prompts\build-tracking-board.local.md
+```
+
+1. In the copy, fill in **Part 1**: must-haves, nice-to-haves, deal-breakers,
+   minimum pay, and how hours convert to a yearly figure.
+2. Give the copy and your sweep results to Claude:
+   - **Claude Code**: run it from this folder, or say where your `Sweeps\`
+     folder is.
+   - **claude.ai or the Claude app**: attach the copy and the
+     `sweep-*-candidates.json` files you want on the board.
+3. Claude asks where the board should live: a **local HTML file** you open from
+   disk, or a private **claude.ai artifact** that saves itself.
+4. After each sweep, run it again. New postings are added; nothing you've
+   already moved or edited is changed.
+
+Give it the `.json` files, not the `.csv`. Only the `.json` carries the full
+posting text, which is what the scoring reads.
+
+What you get: every posting scored 0–100 with the quoted reasons behind the
+score; a progress track (New → Applied → Shortlisted → Interviewing → Offer)
+and an Ended track (Passed / Rejected / Closed); pay converted to a yearly
+figure for sorting; sorts, filters and notes; and card edits that stay locked
+until you choose to change them.
+
+A local board is saved as `job-board.html` beside your `Sweeps\` folder. It
+holds your notes and stages, so it is gitignored in case that folder is this
+one.
 
 ## Supported providers
 
@@ -162,6 +202,13 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.8** (2026-10-22): privacy pass. The example profile and tests use a
+  fictional state (Westmark) instead of a real region, and checks that name it
+  are skipped, and counted, against your own profile. A blocked remote posting
+  now reads "excludes your state of residence" instead of naming Washington,
+  and iCIMS locations parse for every US state, not five western ones.
+  `.gitignore` covers copies of private files, filled-in prompt copies and a
+  local tracking board. New README section on using the tracking-board prompt.
 - **1.3.7** (2026-10-22): `Test-JobSweepLint.ps1` runs PSScriptAnalyzer exactly
   as CI does, and a new lint job runs it on Windows PowerShell 5.1 and
   PowerShell 7, failing on errors and warnings.
