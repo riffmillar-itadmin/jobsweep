@@ -135,12 +135,19 @@ process with the same `-SweepScript` / `-ProfilePath`, prints a summary, and
 exits 1 if either edition fails **or is not installed**. Use it before every
 commit.
 
+GitHub Actions runs the same `-BothEditions` check on every push to `main`
+and every pull request ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)),
+on a Windows runner that has both editions. It can also be started by hand
+from the repository's **Actions** tab.
+
 ## Requirements
 
 Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.1** (2026-10-21): GitHub Actions runs `Test-JobSweepFilters.ps1
+  -BothEditions` on every push to `main` and every pull request.
 - **1.3.0** (2026-10-21): `prompts/build-tracking-board.md`, a Claude prompt
   that turns your sweeps and your criteria into a job tracking board -- local
   HTML or a claude.ai artifact -- with scored cards, a progress track, an

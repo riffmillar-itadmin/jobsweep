@@ -1,0 +1,36 @@
+# Runs the filter regression suite under Windows PowerShell 5.1 AND
+# PowerShell 7 -- the same check as `.\Test-JobSweepFilters.ps1 -BothEditions`
+# before a commit, but on every change, so nobody has to remember.
+#
+# No network, no secrets, no output files: the suite tests the shipped
+# targeting profile plus the EXAMPLE geography, never anyone's local profile.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A test job never writes to the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels a run still in progress.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  filters:
+    name: Filter suite (5.1 and 7)
+    # Windows runners ship both powershell.exe 5.1 and pwsh 7.
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Test-JobSweepFilters.ps1 -BothEditions
+        shell: pwsh
+        run: ./Test-JobSweepFilters.ps1 -BothEditions
