@@ -93,6 +93,8 @@
     instructions with local paths stay out of the public repo.
     1.3.5 (2026-10-22): SECURITY.md (private vulnerability reporting) and a
     Dependabot config that keeps the workflow's GitHub Actions up to date.
+    1.3.6 (2026-10-22): lints clean under PSScriptAnalyzer. Empty catch blocks now
+    log a Write-Verbose reason; PSScriptAnalyzerSettings.psd1 documents the rules.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -119,13 +121,13 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { Write-Verbose "TLS 1.2 not set, using the runtime default: $($_.Exception.Message)" }
 
 # A courteous User-Agent is good manners to an API you are polling, and some
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.3.5'
+$JobSweepVersion = '1.3.6'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -345,6 +347,8 @@ function Merge-JobSweepProfile {
 # Write-Log not yet defined, all anyone saw was "Write-Log is not recognized" --
 # the real error, a missing profile or an unknown key, was swallowed. Fixed 2026-10-20.
 function Write-Log {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '',
+        Justification = 'False positive: no Write-Log cmdlet exists in Windows PowerShell 5.1 or PowerShell 7.')]
     param(
         [Parameter(Mandatory)][string] $Message,
         [ValidateSet('INFO','OK','WARN','ERROR','STEP')][string] $Level = 'INFO'
@@ -353,7 +357,7 @@ function Write-Log {
     $line  = "$stamp  [$($Level.PadRight(5))] $Message"
     if ($script:LogFile) {
         try { Add-Content -Path $script:LogFile -Value $line -Encoding UTF8 -ErrorAction Stop }
-        catch { }   # never let logging break the run
+        catch { Write-Verbose "log write skipped: $($_.Exception.Message)" }   # never let logging break the run
     }
     switch ($Level) {
         'ERROR' { $script:RunErrors++;   Write-Host $Message -ForegroundColor Red }
@@ -372,7 +376,7 @@ function Open-FallbackLog {
     try {
         if (-not (Test-Path $fallbackDir)) { New-Item -ItemType Directory -Path $fallbackDir -Force | Out-Null }
         $script:LogFile = Join-Path $fallbackDir ("sweep-{0}.log" -f $Stamp)
-    } catch { }
+    } catch { Write-Verbose "fallback log unavailable, console only: $($_.Exception.Message)" }
 }
 
 function Complete-RunEarly {
@@ -423,21 +427,21 @@ function Get-HttpFailure {
         $resp = $ErrorRecord.Exception.Response
         if (-not $resp) { return $result }
 
-        try { $result.Status = [int]$resp.StatusCode } catch { }
+        try { $result.Status = [int]$resp.StatusCode } catch { Write-Verbose "no HTTP status on the error: $($_.Exception.Message)" }
 
         # PS 7 / .NET: Headers is a collection of KeyValuePair
         try {
             $ra = $resp.Headers | Where-Object { $_.Key -eq 'Retry-After' } | Select-Object -First 1
             if ($ra) { $result.RetryAfter = [int]([string]($ra.Value | Select-Object -First 1)) }
-        } catch { }
+        } catch { Write-Verbose "Retry-After not readable as PS 7 headers: $($_.Exception.Message)" }
         # PS 5.1 / WebResponse: Headers is a NameValueCollection
         if ($result.RetryAfter -eq 0) {
             try {
                 $v = $resp.Headers['Retry-After']
                 if ($v) { $result.RetryAfter = [int]$v }
-            } catch { }
+            } catch { Write-Verbose "Retry-After not readable as PS 5.1 headers: $($_.Exception.Message)" }
         }
-    } catch { }
+    } catch { Write-Verbose "HTTP failure details unavailable: $($_.Exception.Message)" }
     return $result
 }
 
@@ -681,6 +685,8 @@ function Resolve-WorkdayBullets {
 
        Kept as its own function so the filter suite can test the real mapping rather
        than a copy of it -- this is the code path that lost Jackson Lewis. #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '',
+        Justification = 'Named for the Workday bulletFields array it resolves; the filter suite calls it by this name.')]
     param([object[]]$Bullets, [string]$Location)
     $out = @{ ReqId = ''; Location = $Location }
     $clean = @($Bullets |
@@ -848,6 +854,8 @@ function Test-RemoteFlags {
     <# Screens the posting TEXT of a remote req. Returns @{ Block=<string or ''>;
        Flags=@(<string>...) }. Block is absolute; Flags are appended to Reason so
        the warning travels with the lead instead of killing it. #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '',
+        Justification = 'Tests the whole set of remote-work flags and returns them as a list; the filter suite calls it by this name.')]
     param([string]$Text)
     $result = @{ Block = ''; Flags = @() }
     if ([string]::IsNullOrWhiteSpace($Text)) { return $result }
@@ -864,6 +872,8 @@ function Test-RemoteFlags {
 }
 
 function New-Posting {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '',
+        Justification = 'Builds a posting object in memory; it changes no system state.')]
     param($Source,$Company,$Title,$Location,$Url,$ReqId,$Posted,$Content)
     [pscustomobject][ordered]@{
         Key         = "$Source|$ReqId"
@@ -1558,7 +1568,7 @@ trap {
 # USERPROFILE differs, must fail loudly here rather than quietly writing a Sweeps
 # folder somewhere nobody looks.
 $rootOk   = $false
-try { $rootOk = Test-Path -LiteralPath $OutputRoot -PathType Container } catch { }
+try { $rootOk = Test-Path -LiteralPath $OutputRoot -PathType Container } catch { Write-Verbose "output root not testable, treated as missing: $($_.Exception.Message)" }
 
 if (-not $rootOk) {
     Open-FallbackLog $logStamp
@@ -1589,7 +1599,7 @@ try {
     Get-ChildItem -Path $logDir -Filter 'sweep-*.log' -ErrorAction Stop |
         Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$LogRetentionDays) } |
         Remove-Item -Force -ErrorAction SilentlyContinue
-} catch { }
+} catch { Write-Verbose "old logs not pruned: $($_.Exception.Message)" }
 
 $seen = @{}
 if (Test-Path $stateFile) {

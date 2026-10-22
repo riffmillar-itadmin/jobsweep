@@ -38,6 +38,7 @@ That is what the test suite is for.
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography with placeholder employers. Copy it. |
 | `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 258 cases, no network. |
+| `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
 | `prompts/build-tracking-board.md` | ✅ | A Claude prompt that turns your sweeps and your criteria into a job tracking board. |
 
 `JobSweep.local.psd1` is the file that must never be published. It is first in
@@ -140,12 +141,25 @@ and every pull request ([`.github/workflows/tests.yml`](.github/workflows/tests.
 on a Windows runner that has both editions. It can also be started by hand
 from the repository's **Actions** tab.
 
+The scripts also lint clean under [PSScriptAnalyzer](https://github.com/PowerShell/PSScriptAnalyzer):
+
+```powershell
+Install-Module PSScriptAnalyzer -Scope CurrentUser   # once
+Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1
+```
+
+No output means no findings. The settings file explains each rule that is
+switched off; the few deliberate exceptions are marked on the function itself.
+
 ## Requirements
 
 Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.6** (2026-10-22): lints clean under PSScriptAnalyzer
+  (`PSScriptAnalyzerSettings.psd1`). Empty `catch` blocks now log a reason
+  with `Write-Verbose`; no behaviour change unless run with `-Verbose`.
 - **1.3.5** (2026-10-22): `SECURITY.md` explains how to report a
   vulnerability privately, and `.github/dependabot.yml` has Dependabot check
   the workflow's GitHub Actions for updates weekly.
