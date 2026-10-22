@@ -34,3 +34,21 @@ jobs:
       - name: Run Test-JobSweepFilters.ps1 -BothEditions
         shell: pwsh
         run: ./Test-JobSweepFilters.ps1 -BothEditions
+
+  lint:
+    name: PSScriptAnalyzer (${{ matrix.shell }})
+    # A separate job, so a lint failure never hides a test result or the reverse.
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false            # let both editions report, even if one fails
+      matrix:
+        shell: [powershell, pwsh] # Windows PowerShell 5.1 and PowerShell 7
+    steps:
+      - uses: actions/checkout@v7
+
+      # The step's shell can't come from the matrix, so the matrix picks the
+      # executable instead. The same script is what you run locally.
+      - name: Lint with PSScriptAnalyzer (fails on errors and warnings)
+        shell: cmd
+        run: ${{ matrix.shell }} -NoProfile -ExecutionPolicy Bypass -File .\Test-JobSweepLint.ps1

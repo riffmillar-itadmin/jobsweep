@@ -95,6 +95,8 @@
     Dependabot config that keeps the workflow's GitHub Actions up to date.
     1.3.6 (2026-10-22): lints clean under PSScriptAnalyzer. Empty catch blocks now
     log a Write-Verbose reason; PSScriptAnalyzerSettings.psd1 documents the rules.
+    1.3.7 (2026-10-22): Test-JobSweepLint.ps1 lints the repo as CI does; a lint job
+    now runs it on 5.1 and 7 and fails on errors and warnings.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -127,7 +129,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.3.6'
+$JobSweepVersion = '1.3.7'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo

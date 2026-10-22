@@ -38,6 +38,7 @@ That is what the test suite is for.
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography with placeholder employers. Copy it. |
 | `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 258 cases, no network. |
+| `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
 | `prompts/build-tracking-board.md` | ✅ | A Claude prompt that turns your sweeps and your criteria into a job tracking board. |
 
@@ -144,12 +145,16 @@ from the repository's **Actions** tab.
 The scripts also lint clean under [PSScriptAnalyzer](https://github.com/PowerShell/PSScriptAnalyzer):
 
 ```powershell
-Install-Module PSScriptAnalyzer -Scope CurrentUser   # once
-Invoke-ScriptAnalyzer -Path . -Recurse -Settings .\PSScriptAnalyzerSettings.psd1
+.\Test-JobSweepLint.ps1                            # PowerShell 7
+powershell.exe -File .\Test-JobSweepLint.ps1       # Windows PowerShell 5.1
 ```
 
-No output means no findings. The settings file explains each rule that is
-switched off; the few deliberate exceptions are marked on the function itself.
+It uses `PSScriptAnalyzerSettings.psd1`, installs the pinned analyzer version
+for your user if it is missing, and exits 1 on any error or warning;
+Information findings are listed but don't fail. The settings file explains
+each rule that is switched off; the few deliberate exceptions are marked on the
+function itself. CI runs the same script on both editions in a separate job,
+alongside the tests, and shows each finding as an annotation on its line.
 
 ## Requirements
 
@@ -157,6 +162,9 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.7** (2026-10-22): `Test-JobSweepLint.ps1` runs PSScriptAnalyzer exactly
+  as CI does, and a new lint job runs it on Windows PowerShell 5.1 and
+  PowerShell 7, failing on errors and warnings.
 - **1.3.6** (2026-10-22): lints clean under PSScriptAnalyzer
   (`PSScriptAnalyzerSettings.psd1`). Empty `catch` blocks now log a reason
   with `Write-Verbose`; no behaviour change unless run with `-Verbose`.
