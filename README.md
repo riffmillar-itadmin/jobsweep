@@ -38,6 +38,7 @@ That is what the test suite is for.
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography with placeholder employers. Copy it. |
 | `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 258 cases, no network. |
+| `prompts/build-tracking-board.md` | ✅ | A Claude prompt that turns your sweeps and your criteria into a job tracking board. |
 
 `JobSweep.local.psd1` is the file that must never be published. It is first in
 `.gitignore` for that reason. Before making a repository public, read
@@ -140,6 +141,11 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.0** (2026-10-21): `prompts/build-tracking-board.md`, a Claude prompt
+  that turns your sweeps and your criteria into a job tracking board -- local
+  HTML or a claude.ai artifact -- with scored cards, a progress track, an
+  Ended track (Passed / Rejected / Closed), pay normalised to an annual
+  figure, sorts, filters and locked-by-default card editing.
 - **1.2.3** (2026-10-20): `Test-JobSweepFilters.ps1 -BothEditions` runs the
   suite under Windows PowerShell 5.1 and PowerShell 7 and fails if either
   fails or is missing.
