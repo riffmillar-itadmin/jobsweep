@@ -41,6 +41,7 @@ That is what the test suite is for.
 | `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 258 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
+| `CLAUDE.md` | ✅ | Rules for Claude Code sessions in this repo. Personal ones go in a gitignored `CLAUDE.local.md`. |
 | `prompts/build-tracking-board.md` | ✅ | A Claude prompt that turns your sweeps and your criteria into a job tracking board. |
 
 `JobSweep.local.psd1` is the file that must never be published. It is first in
@@ -202,6 +203,9 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.9** (2026-10-23): `CLAUDE.md` holds the repo's rules for Claude Code
+  sessions: review before commit, versioning, signed releases, tests on both
+  editions, and privacy. Personal instructions stay in `CLAUDE.local.md`.
 - **1.3.8** (2026-10-22): privacy pass. The example profile and tests use a
   fictional state (Westmark) instead of a real region, and checks that name it
   are skipped, and counted, against your own profile. A blocked remote posting
