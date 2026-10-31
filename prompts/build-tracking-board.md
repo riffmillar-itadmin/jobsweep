@@ -141,6 +141,11 @@ are state.
   -- typically one imported from an older tracker, where the first date
   written down is a later event such as a repost -- use the applied date and
   mark it approximate.
+- **Date posted** is stored on every card as a `YYYY-MM-DD` date, read from
+  `Posted`. Providers write it differently: a timestamp is cut to its date,
+  and a relative one ("Posted Today", "Posted 5 Days Ago") is counted back
+  from the sweep file's date, not from the day you build the board. With no
+  usable `Posted`, use Date added.
 - When the board already exists, read its current state first (the embedded
   data, or an Export file the user supplies) and only **add** cards that are
   not on it. Never move, re-score or delete an existing card, and never
@@ -292,6 +297,13 @@ Then one button per `custom_filters` entry. Decide each card's match when
 you build the board, from the posting text, and store it with the card -- the
 page does not re-judge. Also add a text search over company, title and
 location.
+
+The exception is a filter that depends on today's date, such as "Posted this
+week" or "Closes soon". Never store it as a yes or no: it is right on the day
+it is written and wrong a week later, and a later run cannot fix it, because
+existing cards are never re-judged. Store the date it depends on (Date posted,
+a closing date) and have the page compare it with today each time it loads.
+It is not an editable field: to change it, correct the date.
 
 The user can hide any default button they do not use; hidden buttons are
 remembered and listed under a **More filters** menu so they can come back.

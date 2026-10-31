@@ -102,6 +102,8 @@
     covers every US state; README section for the tracking-board prompt.
     1.3.9 (2026-10-23): CLAUDE.md -- repo rules for Claude Code sessions (review,
     versioning, signing, both-edition tests, privacy) travel with the repo.
+    1.3.10 (2026-10-31): tracking-board prompt -- date-based filters such as
+    "Posted this week" are worked out by the page on each load, never stored.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -134,7 +136,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.3.9'
+$JobSweepVersion = '1.3.10'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo

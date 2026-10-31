@@ -203,6 +203,11 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.10** (2026-10-31): the tracking-board prompt stores a Date posted on
+  every card, and a filter that depends on today's date, such as "Posted this
+  week", is worked out by the page each time it loads instead of being saved
+  with the card. A saved answer went stale within a week, and later runs never
+  corrected it, because existing cards are never re-judged.
 - **1.3.9** (2026-10-23): `CLAUDE.md` holds the repo's rules for Claude Code
   sessions: review before commit, versioning, signed releases, tests on both
   editions, and privacy. Personal instructions stay in `CLAUDE.local.md`.
