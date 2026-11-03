@@ -29,7 +29,8 @@
     neither set, Sweeps\ goes beside this script.
 
 .PARAMETER Source
-    Run only one provider: Greenhouse, Lever, Workday, Microsoft. Omit for all.
+    Run only one provider: Greenhouse, Lever, Workday, Microsoft, ADP, iCIMS,
+    UltiPro or Dayforce. Omit for all.
 
 .PARAMETER DryRun
     Fetch, screen and report, but do NOT update the seen-state file. Safe to re-run.
@@ -110,6 +111,10 @@
     tracking-board prompt reads blank Pay from Content and flags a blank Location.
     1.3.12 (2026-11-03): docs -- an example tracking board for a fictional job
     seeker in Westmark, with screenshots in the README. No code changes.
+    1.4.0 (2026-11-03): Dayforce provider -- CSRF token and web session, paged
+    search, pay from the detail call when the text gives none. Invoke-Json takes
+    -Headers and -WebSession. Test summary shows profiles and counts. A -Source
+    with no matching profile entry is an error, not "No postings retrieved".
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -120,7 +125,7 @@ param(
     # Resolved after the profiles load: this parameter, else OutputRoot in a
     # profile, else the folder this script lives in.
     [string] $OutputRoot,
-    [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro')]
+    [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro','Dayforce')]
     [string] $Source,
     [switch] $DryRun,
     [switch] $SkipDetail,
@@ -142,7 +147,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.3.12'
+$JobSweepVersion = '1.4.0'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -154,6 +159,7 @@ $script:RunStart    = Get-Date
 $script:LogFile     = $null
 $script:ExitCode    = 0
 $script:Throttle    = $PolitenessMs   # per-provider override, set in the source loop
+$script:DayforceSessions = @{}         # namespace -> session and CSRF header, see Get-DayforceSession
 
 # ============================================================================
 #  CONFIGURATION -- edit this block, not the logic below
@@ -509,13 +515,19 @@ function Convert-HtmlToText {
 }
 
 function Invoke-Json {
-    param([string]$Uri, [string]$Method = 'Get', $Body, [string]$Label)
+    <# -Headers and -WebSession were added for Dayforce, which wants a CSRF token
+       in a header and the cookie that came with it. Both are optional, so every
+       other provider calls this exactly as before. #>
+    param([string]$Uri, [string]$Method = 'Get', $Body, [string]$Label,
+          [hashtable]$Headers, [Microsoft.PowerShell.Commands.WebRequestSession]$WebSession)
     if (-not $Label) { $Label = ($Uri -split '\?')[0] }
     $p = @{ Uri = $Uri; Method = $Method; UserAgent = $UserAgent; TimeoutSec = 45 }
     if ($null -ne $Body) {
         $p['Body']        = ($Body | ConvertTo-Json -Depth 6 -Compress)
         $p['ContentType'] = 'application/json'
     }
+    if ($Headers)    { $p['Headers']    = $Headers }
+    if ($WebSession) { $p['WebSession'] = $WebSession }
     return Invoke-WithRetry -Label $Label -Action { Invoke-RestMethod @p }
 }
 
@@ -1594,6 +1606,173 @@ function Add-MicrosoftDetail {
     Start-Sleep -Milliseconds $script:Throttle
 }
 
+# ---- Dayforce ---------------------------------------------------------------
+# jobs.dayforcehcm.com, confirmed live 2026-11-03. The search is a POST that
+# answers 403 without a CSRF token, so each source first fetches a token from
+# /api/auth/csrf in a WebRequestSession and reuses that session -- the token is
+# tied to the cookie the same call sets. The search carries the full HTML
+# description; pay is only on the per-posting detail call, as the structured
+# attributes HiringMinRate and HiringMaxRate.
+
+function ConvertFrom-DayforcePosting {
+    <# One jobPostings[] entry from the search, reduced to the fields a posting
+       needs. Pure, so the suite can test it without a network. #>
+    param($Job)
+    $has = { param($o, $n) $null -ne $o -and $o.PSObject.Properties.Name -contains $n -and $null -ne $o.$n -and "$($o.$n)" -ne '' }
+
+    $id = if (& $has $Job 'jobPostingId') { [string]$Job.jobPostingId } else { '' }
+    $req = if (& $has $Job 'jobReqId') { [string]$Job.jobReqId } else { $id }
+    $title = if (& $has $Job 'jobTitle') { [string]$Job.jobTitle } else { '' }
+    # PowerShell 7 turns an ISO timestamp into a DateTime while parsing the JSON and
+    # 5.1 leaves it a string. Write both back as the same ISO text.
+    $posted = ''
+    if (& $has $Job 'postingStartTimestampUTC') {
+        $v = $Job.postingStartTimestampUTC
+        $posted = if ($v -is [datetime]) {
+            $v.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+        } else { [string]$v }
+    }
+    $html = if (& $has $Job 'jobDescription') { [string]$Job.jobDescription } else { '' }
+
+    # Every location, "City, ST" where both are given, else the formatted address.
+    # A virtual location becomes the word Remote in front, so Test-IsRemote and the
+    # remote screen see it the way they see any other provider's remote posting.
+    $locs = @()
+    if (& $has $Job 'postingLocations') {
+        foreach ($L in @($Job.postingLocations)) {
+            $one = ''
+            if ((& $has $L 'cityName') -and (& $has $L 'stateCode')) { $one = "$($L.cityName), $($L.stateCode)" }
+            elseif (& $has $L 'formattedAddress') { $one = [string]$L.formattedAddress }
+            elseif (& $has $L 'cityName') { $one = [string]$L.cityName }
+            if ($one -and ($locs -notcontains $one)) { $locs += $one }
+        }
+    }
+    $remote = (& $has $Job 'hasVirtualLocation') -and [bool]$Job.hasVirtualLocation
+    if ($remote) { $locs = @('Remote') + $locs }
+
+    return @{
+        Id = $id; ReqId = $req; Title = $title; Posted = $posted
+        Location = ($locs -join ' | '); Remote = $remote; Html = $html
+    }
+}
+
+function Get-DayforcePay {
+    <# Pay from a detail response's jobPostingAttributes[]. Both HiringMinRate and
+       HiringMaxRate must be present: a lone figure is not a range. PayType, or a
+       top figure under 500, marks an hourly rate. Returns '' when there is no range. #>
+    param($Attributes)
+    $vals = @{}
+    foreach ($a in @($Attributes)) {
+        if ($null -eq $a) { continue }
+        $names = $a.PSObject.Properties.Name
+        $name = ''
+        foreach ($k in 'name', 'attributeName', 'code') { if ($names -contains $k -and $a.$k) { $name = [string]$a.$k; break } }
+        if (-not $name) { continue }
+        foreach ($k in 'value', 'attributeValue', 'displayValue', 'valueText', 'numericValue') {
+            if ($names -contains $k -and $null -ne $a.$k -and "$($a.$k)" -ne '') { $vals[$name] = [string]$a.$k; break }
+        }
+    }
+    $num = { param($v) $d = 0.0
+             if ([double]::TryParse(($v -replace '[$,\s]', ''), [Globalization.NumberStyles]::Float,
+                                    [Globalization.CultureInfo]::InvariantCulture, [ref]$d)) { $d } else { $null } }
+    if (-not ($vals.ContainsKey('HiringMinRate') -and $vals.ContainsKey('HiringMaxRate'))) { return '' }
+    $lo = & $num $vals['HiringMinRate']; $hi = & $num $vals['HiringMaxRate']
+    if ($null -eq $lo -or $null -eq $hi -or $lo -le 0 -or $hi -lt $lo) { return '' }
+    $hourly = ($vals.ContainsKey('PayType') -and $vals['PayType'] -match '(?i)hour') -or $hi -lt 500
+    if ($hourly) { return ('${0:N2} - ${1:N2} per hour' -f $lo, $hi) }
+    return ('${0:N0} - ${1:N0}' -f $lo, $hi)
+}
+
+function Get-DayforceSession {
+    <# A WebRequestSession plus the CSRF token for one namespace, fetched once and
+       kept for the run so the detail pass reuses it. #>
+    param([string]$Namespace)
+    if ($script:DayforceSessions.ContainsKey($Namespace)) { return $script:DayforceSessions[$Namespace] }
+    $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $r = Invoke-Json -Uri 'https://jobs.dayforcehcm.com/api/auth/csrf' -WebSession $session -Label "Dayforce $Namespace CSRF token"
+    $token = ''
+    if ($r -and $r.PSObject.Properties.Name -contains 'csrfToken') { $token = [string]$r.csrfToken }
+    if (-not $token) { throw "Dayforce $Namespace : /api/auth/csrf returned no csrfToken, so the search would answer 403" }
+    $s = @{ Session = $session; Headers = @{ 'X-CSRF-TOKEN' = $token } }
+    $script:DayforceSessions[$Namespace] = $s
+    return $s
+}
+
+function Get-DayforceJobs {
+    param($Src)
+    $ns    = [string]$Src.Namespace
+    $board = 'CANDIDATEPORTAL'
+    if ($Src.ContainsKey('Board') -and $Src.Board) { $board = [string]$Src.Board }
+    $df    = Get-DayforceSession $ns
+    $uri   = "https://jobs.dayforcehcm.com/api/geo/$ns/jobposting/search"
+    $out   = @()
+    $seenIds = @{}
+    $start = 0
+    $firstPage = 0
+    $cap   = 2000
+    $advisedTotal = 0
+    $stopReason = 'ran out of pages'
+
+    # Same paging rule as UltiPro and Workday: maxCount is ADVISORY ONLY. Stop on
+    # an empty page, a page shorter than the first, a page with nothing new, or
+    # the safety cap -- never on a server-reported total.
+    while ($true) {
+        $body = @{ clientNamespace = $ns; jobBoardCode = $board; cultureCode = 'en-US'; paginationStart = $start }
+        $r = Invoke-Json -Uri $uri -Method 'Post' -Body $body -Headers $df.Headers -WebSession $df.Session `
+                         -Label "$($Src.Company) Dayforce search"
+        $batch = @()
+        if ($r -and $r.PSObject.Properties.Name -contains 'jobPostings' -and $r.jobPostings) { $batch = @($r.jobPostings) }
+        if ($r -and $r.PSObject.Properties.Name -contains 'maxCount' -and $r.maxCount) { $advisedTotal = [int]$r.maxCount }
+        if ($batch.Count -eq 0) { break }
+        if ($firstPage -eq 0) { $firstPage = $batch.Count }
+
+        $newThisPage = 0
+        foreach ($j in $batch) {
+            $f = ConvertFrom-DayforcePosting $j
+            if (-not $f.Id -or -not $f.Title -or $seenIds.ContainsKey($f.Id)) { continue }
+            $seenIds[$f.Id] = $true
+            $newThisPage++
+            $url = "https://jobs.dayforcehcm.com/en-US/$ns/$board/jobs/$($f.Id)"
+            $detail = "https://jobs.dayforcehcm.com/api/geo/$ns/jobposting/$ns/en-US/1/$($f.Id)"
+            $out += (New-Posting -Source 'Dayforce' -Company $Src.Company -Title $f.Title `
+                        -Location $f.Location -Url $url -ReqId $f.ReqId -Posted $f.Posted `
+                        -Content (Convert-HtmlToText $f.Html) |
+                     Add-Member -NotePropertyName DetailPath -NotePropertyValue $detail -PassThru |
+                     Add-Member -NotePropertyName DayforceNamespace -NotePropertyValue $ns -PassThru)
+        }
+
+        if ($newThisPage -eq 0)          { $stopReason = 'page repeated -- board ignoring paginationStart'; break }
+        if ($batch.Count -lt $firstPage) { $stopReason = 'short page'; break }
+        $start += $batch.Count
+        if ($out.Count -ge $cap)         { $stopReason = "safety cap $cap reached"; break }
+        Start-Sleep -Milliseconds $script:Throttle
+    }
+
+    Write-Log ("   Dayforce {0}: {1} collected (advised total {2}) -- {3}" -f `
+               $Src.Company, $out.Count, $advisedTotal, $stopReason)
+    return $out
+}
+
+function Add-DayforceDetail {
+    <# The search already carried the full description, so the detail call is made
+       only for pay, and only when the text did not state it. #>
+    param($Posting)
+    try {
+        $df = Get-DayforceSession $Posting.DayforceNamespace
+        $d = Invoke-Json -Uri $Posting.DetailPath -Headers $df.Headers -WebSession $df.Session `
+                         -Label "$($Posting.Company) Dayforce detail"
+        $attrs = @()
+        if ($d -and $d.PSObject.Properties.Name -contains 'jobPostingAttributes' -and $d.jobPostingAttributes) {
+            $attrs = @($d.jobPostingAttributes)
+        }
+        $pay = Get-DayforcePay $attrs
+        if ($pay) { $Posting.Pay = $pay }
+    } catch {
+        Write-Log "  detail fetch failed for $($Posting.Company) / $($Posting.Title): $($_.Exception.Message)" 'WARN'
+    }
+    Start-Sleep -Milliseconds $script:Throttle
+}
+
 # ============================================================================
 #  MAIN
 # ============================================================================
@@ -1671,7 +1850,15 @@ if (Test-Path $stateFile) {
 Write-Log "State: $($seen.Count) requisitions previously seen."
 
 $sources = $Config.Sources
-if ($Source) { $sources = $sources | Where-Object { $_.Provider -eq $Source } }
+if ($Source) {
+    $sources = @($sources | Where-Object { $_.Provider -eq $Source })
+    # A -Source that matches nothing used to end as "No postings retrieved", which
+    # reads like a quiet week. Say what is actually wrong.
+    if ($sources.Count -eq 0) {
+        Write-Log "No source in the profile uses Provider '$Source'. Add one to Sources in your local profile." 'ERROR'
+        Complete-Run; exit $script:ExitCode
+    }
+}
 
 $all = @()
 foreach ($src in $sources) {
@@ -1687,6 +1874,7 @@ foreach ($src in $sources) {
             'ADP'        { $got = @(Get-AdpJobs        $src) }
             'iCIMS'      { $got = @(Get-IcimsJobs      $src) }
             'UltiPro'    { $got = @(Get-UltiProJobs    $src) }
+            'Dayforce'   { $got = @(Get-DayforceJobs   $src) }
         }
         Write-Log "   $($got.Count) postings"
         $all += $got
@@ -1718,7 +1906,10 @@ foreach ($p in $new) {
 # --- detail fetch only for survivors -------------------------------------
 $keepers = @($new | Where-Object { $_.Screen -eq 'keep' })
 if (-not $SkipDetail) {
-    $needDetail = @($keepers | Where-Object { $_.PSObject.Properties.Name -contains 'DetailPath' -and -not $_.Content })
+    # Dayforce postings arrive with their text, so they need the detail call only
+    # when that text gave no pay.
+    $needDetail = @($keepers | Where-Object { $_.PSObject.Properties.Name -contains 'DetailPath' -and
+        (-not $_.Content -or ($_.Source -eq 'Dayforce' -and -not $_.Pay)) })
     if ($needDetail.Count -gt 0) {
         Write-Log "Fetching detail for $($needDetail.Count) postings..." 'STEP'
         $i = 0
@@ -1731,6 +1922,7 @@ if (-not $SkipDetail) {
                 'ADP'       { Add-AdpDetail       $p }
                 'iCIMS'     { Add-IcimsDetail     $p }
                 'UltiPro'   { Add-UltiProDetail   $p }
+                'Dayforce'  { Add-DayforceDetail  $p }
             }
         }
     }

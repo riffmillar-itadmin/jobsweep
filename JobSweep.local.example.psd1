@@ -112,6 +112,7 @@ LiftingLimitLb = 50
 #   iCIMS       careers-<Token>.icims.com               -- Token is in the host
 #   UltiPro     <Tenant>.ultipro.com, BoardId is the opportunity GUID
 #   ADP         Cid and CcId are query parameters on the careers URL
+#   Dayforce    jobs.dayforcehcm.com/en-US/<Namespace>/<Board>/jobs -- both in the URL
 #
 # Start with five or six employers you would actually work for, confirm the
 # sweep returns their postings, then grow the list.
@@ -137,6 +138,10 @@ Sources = @(
     # ---- ADP WorkforceNow: Cid and CcId come off the careers URL
     @{ Provider='ADP';        Company='Example Manufacturing'
        Cid='00000000-0000-0000-0000-000000000000'; CcId='19000101_000001' }
+
+    # ---- Dayforce: jobs.dayforcehcm.com/api/geo/<Namespace>/jobposting/search
+    # Board defaults to CANDIDATEPORTAL, the name most employers use.
+    @{ Provider='Dayforce';   Company='Example Logistics';   Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }
 )
 
 }

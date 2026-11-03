@@ -33,7 +33,10 @@ param(
     # beside the sweep script -- point this at another profile to test it.
     [string[]] $ProfilePath,
     # Re-run this suite, with the same arguments, under powershell.exe AND pwsh.
-    [switch]   $BothEditions
+    [switch]   $BothEditions,
+    # Where a run writes its counts as JSON. -BothEditions sets this for each
+    # edition so the summary table can show them; you never need to.
+    [string]   $ResultPath
 )
 
 Set-StrictMode -Version Latest
@@ -50,23 +53,41 @@ if ($BothEditions) {
     $q    = { param($s) "'" + ($s -replace "'", "''") + "'" }
     $call = "& $(& $q $PSCommandPath) -SweepScript $(& $q $SweepScript)"
     if ($ProfilePath) { $call += ' -ProfilePath ' + (($ProfilePath | ForEach-Object { & $q $_ }) -join ',') }
-    $call += '; exit $LASTEXITCODE'
 
+    # Each edition writes its counts and profile to its own temp file, so the
+    # summary is one table that holds the whole result. A run that dies before
+    # writing it shows '-' in those columns and fails on its exit code.
     $results = foreach ($exe in 'powershell.exe', 'pwsh') {
         Write-Host "`n==== $exe ====" -ForegroundColor Cyan
         if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) {
             Write-Host "$exe not found -- cannot test this edition." -ForegroundColor Red
-            [pscustomobject]@{ Edition = $exe; Version = '-'; Result = 'MISSING' }
+            [pscustomobject][ordered]@{ Edition = $exe; Version = '-'; Profile = '-'; Pass = '-'; Fail = '-'; Skipped = '-'; Result = 'MISSING' }
             continue
         }
+        $out = Join-Path ([IO.Path]::GetTempPath()) ("jobsweep-result-{0}.json" -f ([guid]::NewGuid().ToString('N')))
         $ver = & $exe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
-        & $exe -NoProfile -ExecutionPolicy Bypass -Command $call | Out-Host
+        & $exe -NoProfile -ExecutionPolicy Bypass -Command ($call + ' -ResultPath ' + (& $q $out) + '; exit $LASTEXITCODE') | Out-Host
         $code = $LASTEXITCODE
-        [pscustomobject]@{ Edition = $exe; Version = "$ver"; Result = $(if ($code -eq 0) { 'PASS' } else { "FAIL (exit $code)" }) }
+        $r = $null
+        if (Test-Path -LiteralPath $out) {
+            try { $r = Get-Content -Raw -LiteralPath $out | ConvertFrom-Json }
+            catch { Write-Host "Could not read the $exe result file: $($_.Exception.Message)" -ForegroundColor Red }
+            Remove-Item -LiteralPath $out -Force -ErrorAction SilentlyContinue
+        }
+        [pscustomobject][ordered]@{
+            Edition = $exe
+            Version = "$ver"
+            Profile = $(if ($r) { $r.Profile } else { '-' })
+            Pass    = $(if ($r) { $r.Pass } else { '-' })
+            Fail    = $(if ($r) { $r.Fail } else { '-' })
+            Skipped = $(if ($r) { $r.Skipped } else { '-' })
+            Result  = $(if ($code -eq 0 -and $r) { 'PASS' } elseif ($code -eq 0) { 'FAIL (no counts written)' } else { "FAIL (exit $code)" })
+        }
     }
 
     Write-Host "`n==== summary ====" -ForegroundColor Cyan
-    $results | Format-Table -AutoSize | Out-Host
+    # Out-String with a wide line so a long profile list is not cut to the window.
+    $results | Format-Table -AutoSize | Out-String -Width 400 | Write-Host
     if (@($results | Where-Object { $_.Result -ne 'PASS' }).Count -gt 0) { exit 1 }
     exit 0
 }
@@ -85,7 +106,8 @@ if ($parseErrors) {
 $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteTitle','Test-RemoteFlags',
           'Test-LicenceRequired','Get-DegreeFlag','Get-PayRange','Repair-TitleCase','Test-DeveloperRole',
           'Test-PhysicalDemand','Test-IsRequisitionId','Test-LooksLikeLocationList','Resolve-WorkdayBullets',
-          'Test-ComplianceTitleOnly','Test-ItContext','Merge-JobSweepProfile')
+          'Test-ComplianceTitleOnly','Test-ItContext','Merge-JobSweepProfile',
+          'ConvertFrom-DayforcePosting','Get-DayforcePay')
 $parts = @()
 
 $assign = @($ast.FindAll({ param($n)
@@ -365,6 +387,50 @@ Check 'placeholder band'      (Get-PayRange '<span>$1</span><span class="divider
 Check 'open-ended figure'     (Get-PayRange 'The range for this position is from $120,000+ with offers contingent') ''
 Check 'copay still not pay'   (Get-PayRange 'Pay Range: a $5.00 to $10.00 copay applies') ''
 
+Write-Host "`n-- DAYFORCE: search postings and detail pay (added 2026-11-03) --"
+# Shapes from a live board, with every value invented. The search gives text and
+# locations; pay comes only from the detail call's jobPostingAttributes.
+$dfJson = @'
+[
+  { "jobPostingId": 9101, "jobReqId": 4402, "jobTitle": "Endpoint Engineer",
+    "postingStartTimestampUTC": "2026-10-30T16:00:00Z", "hasVirtualLocation": false,
+    "jobDescription": "<p>Manage <b>Intune</b>.</p>",
+    "postingLocations": [ { "cityName": "Harborview", "stateCode": "WM", "formattedAddress": "1 Dock St, Harborview, WM" },
+                          { "cityName": "Brookfield", "stateCode": "WM" },
+                          { "cityName": "Harborview", "stateCode": "WM" } ] },
+  { "jobPostingId": 9102, "jobTitle": "Desktop Support Analyst", "hasVirtualLocation": true,
+    "postingLocations": [ { "cityName": "Harborview", "stateCode": "WM" } ] },
+  { "jobPostingId": 9103, "jobTitle": "Systems Administrator", "hasVirtualLocation": true, "postingLocations": [] },
+  { "jobPostingId": 9104, "jobTitle": "IT Technician", "postingLocations": [ { "formattedAddress": "Millbrook Campus" } ] }
+]
+'@ | ConvertFrom-Json
+$df = @($dfJson | ForEach-Object { ConvertFrom-DayforcePosting $_ })
+Check 'df id'                   $df[0].Id        '9101'
+Check 'df req # from jobReqId'  $df[0].ReqId     '4402'
+Check 'df req # falls back'     $df[1].ReqId     '9102'
+Check 'df title'                $df[0].Title     'Endpoint Engineer'
+Check 'df posted'               $df[0].Posted    '2026-10-30T16:00:00Z'
+Check 'df locations deduped'    $df[0].Location  'Harborview, WM | Brookfield, WM'
+Check 'df onsite not remote'    $df[0].Remote    $false
+Check 'df virtual + office'     $df[1].Location  'Remote | Harborview, WM'
+Check 'df virtual only'         $df[2].Location  'Remote'
+Check 'df address fallback'     $df[3].Location  'Millbrook Campus'
+Check 'df no description'       $df[1].Html      ''
+Check 'df virtual reads remote' (Test-LocationMatch $df[1].Location).Ok $true
+Check 'df virtual is remote'    (Test-IsRemote $df[2].Location) $true
+
+$dfAttr = { param($pairs) @($pairs.GetEnumerator() | ForEach-Object { [pscustomobject]@{ name = $_.Key; value = $_.Value } }) }
+Check 'df pay salary'           (Get-DayforcePay (& $dfAttr @{ HiringMinRate = '85000'; HiringMaxRate = '105000'; PayType = 'Salary' })) '$85,000 - $105,000'
+Check 'df pay hourly by type'   (Get-DayforcePay (& $dfAttr @{ HiringMinRate = '24.1'; HiringMaxRate = '29.9'; PayType = 'Hourly' })) '$24.10 - $29.90 per hour'
+Check 'df pay hourly by size'   (Get-DayforcePay (& $dfAttr @{ HiringMinRate = '31.10'; HiringMaxRate = '44.60' })) '$31.10 - $44.60 per hour'
+Check 'df pay commas and $'     (Get-DayforcePay (& $dfAttr @{ HiringMinRate = '$70,000.00'; HiringMaxRate = '$90,000.00' })) '$70,000 - $90,000'
+Check 'df lone min not pay'     (Get-DayforcePay (& $dfAttr @{ HiringMinRate = '85000'; PayType = 'Salary' })) ''
+Check 'df max below min'        (Get-DayforcePay (& $dfAttr @{ HiringMinRate = '90000'; HiringMaxRate = '80000' })) ''
+Check 'df zero not pay'         (Get-DayforcePay (& $dfAttr @{ HiringMinRate = '0'; HiringMaxRate = '0' })) ''
+Check 'df no attributes'        (Get-DayforcePay @()) ''
+Check 'df other value key'      (Get-DayforcePay @([pscustomobject]@{ name = 'HiringMinRate'; attributeValue = '60000' },
+                                                  [pscustomobject]@{ name = 'HiringMaxRate'; attributeValue = '75000' })) '$60,000 - $75,000'
+
 # ---- REMOTE STATED IN THE TITLE, added 2026-09-21 ------------------------
 # An employer filing a fully remote req against its out-of-state head office.
 Check 'head-office title rescue' (Test-LocationMatch 'Springfield, IL' 'Engineer, Endpoint - Remote').Ok $true
@@ -630,4 +696,10 @@ if ($writeLogDef.Count -eq 1 -and $mergeCall.Count -eq 1) {
 
 $skipNote = if ($skipped -gt 0) { "   SKIPPED $skipped example-geography checks (not the example profile -- cover your own places in Test-JobSweepProfile.ps1)" } else { '' }
 Write-Host ("`nPASS {0}   FAIL {1}{2}" -f $pass, $fail, $skipNote)
+if ($ResultPath) {
+    [ordered]@{
+        Pass = $pass; Fail = $fail; Skipped = $skipped
+        Profile = (($ProfilePath | ForEach-Object { Split-Path $_ -Leaf }) -join ' + ')
+    } | ConvertTo-Json -Compress | Set-Content -LiteralPath $ResultPath -Encoding utf8
+}
 if ($fail -gt 0) { exit 1 }
