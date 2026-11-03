@@ -38,7 +38,7 @@ That is what the test suite is for.
 | `JobSweep.local.psd1` | ⛔ **gitignored** | **Where you will go and who you are watching.** Geography, commute boundary, remote rules, and the employer list. |
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 270 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 292 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
 | `CLAUDE.md` | ✅ | Rules for Claude Code sessions in this repo. Personal ones go in a gitignored `CLAUDE.local.md`. |
@@ -160,8 +160,8 @@ one.
 
 ## Supported providers
 
-Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, and the Microsoft
-careers API. `JobSweep.local.example.psd1` documents where to find the token,
+Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce, and the
+Microsoft careers API. `JobSweep.local.example.psd1` documents where to find the token,
 tenant or board ID for each.
 
 ## Profiles
@@ -193,6 +193,16 @@ process with the same `-SweepScript` / `-ProfilePath`, prints a summary, and
 exits 1 if either edition fails **or is not installed**. Use it before every
 commit.
 
+The summary is one table with everything a result needs: each edition's
+version, the profiles it ran against, and its pass, fail and skipped counts.
+
+```text
+Edition        Version        Profile                                               Pass Fail Skipped Result
+-------        -------        -------                                               ---- ---- ------- ------
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  292    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  292    0       0 PASS
+```
+
 GitHub Actions runs the same `-BothEditions` check on every push to `main`
 and every pull request ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)),
 on a Windows runner that has both editions. It can also be started by hand
@@ -218,6 +228,13 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.4.0** (2026-11-03): a Dayforce provider (`jobs.dayforcehcm.com`). It
+  fetches a CSRF token in a web session, pages the search 25 at a time, reads
+  the full description and every location (a virtual location reads as Remote),
+  and fetches pay from the detail call only when the text gives none.
+  `Invoke-Json` takes `-Headers` and `-WebSession`. The `-BothEditions` summary
+  now shows the profiles used and the pass, fail and skipped counts for each
+  edition. 22 new regression cases (292).
 - **1.3.12** (2026-11-03): an example tracking board,
   `docs/example-board.html`, for a fictional job seeker in Westmark, with two
   screenshots in the README's tracking-board section. Every name and figure on
