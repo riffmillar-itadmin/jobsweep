@@ -104,6 +104,10 @@
     versioning, signing, both-edition tests, privacy) travel with the repo.
     1.3.10 (2026-10-31): tracking-board prompt -- date-based filters such as
     "Posted this week" are worked out by the page on each load, never stored.
+    1.3.11 (2026-11-03): Get-PayRange decodes HTML and reads five more pay shapes
+    (k figures, Min/Max lines, unit-first and labelled hourly bands, USD before each
+    figure); real sweeps had left Pay blank on 47 postings that stated it. The
+    tracking-board prompt reads blank Pay from Content and flags a blank Location.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -136,7 +140,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.3.10'
+$JobSweepVersion = '1.3.11'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -598,7 +602,7 @@ function Test-PhysicalDemand {
 }
 
 function Get-PayRange {
-    <# Two branches, tried in order. Widened 2026-09-20 after the Sept 18 run left the Pay
+    <# Branches, tried in order. Widened 2026-09-20 after the Sept 18 run left the Pay
        column BLANK on two hourly rows ($34.35-$46.20/hr) while matching a monthly-salary
        band of $8,960-$12,120 fine.
 
@@ -610,23 +614,56 @@ function Get-PayRange {
        WHY BRANCH 1 KEEPS ITS WIDTH REQUIREMENT: it is what stops prose matching. A posting
        that says "a $5 to $10 copay" or "$10 copays" must not produce a pay range. So the
        narrow figures are allowed ONLY in branch 2, and only when an HOURLY UNIT follows --
-       the unit is mandatory there, not optional as it is in branch 1. #>
+       the unit is mandatory there, not optional as it is in branch 1.
+
+       Widened again 2026-11-03, after a check of every real sweep found Pay blank on 47
+       postings that state pay. Same failure as before: blank, never wrong. The text is now
+       decoded first, because Greenhouse hands back HTML with the dash as &mdash; between
+       <span> tags. Branches 3 to 6 cover the other shapes: $70k to $150k, an hourly band
+       whose unit comes BEFORE the figures, a labelled "Pay Range" with cents and no unit,
+       and a minimum and a maximum on separate labelled lines. Each new narrow-figure branch
+       needs a label (hourly, pay range, min/max) or cents, so copays still do not match.
+       A lone figure ("$120,000+", "$5,000 sign on bonus") is still not a range. #>
     param([string]$Text)
     if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
 
+    $Text = [System.Net.WebUtility]::HtmlDecode(($Text -replace '<[^>]+>', ' ')) -replace '\u00a0', ' '
+    # iCIMS writes the currency before each figure: "USD $18.00 - USD $21.00 /Hr."
+    $dash = '\s*(-|\u2013|\u2014|to)\s*(USD\s*)?'
+
+    # Each pattern is in parentheses: a comma binds tighter than +, so without them
+    # 'a' + $dash + 'b', 'c' would concatenate an array.
     $patterns = @(
         # 1. salary scale: three or more digits a side, unit optional
-        '\$\s?[\d,]{3,}(\.\d{2})?\s*(-|\u2013|to)\s*\$?\s?[\d,]{3,}(\.\d{2})?\s*(per hour|hourly|/ ?hr|annually|per year|/ ?yr)?',
+        ('\$\s?[\d,]{3,}(\.\d{2})?' + $dash + '\$?\s?[\d,]{3,}(\.\d{2})?\s*(per hour|hourly|/ ?hr|annually|per year|/ ?yr)?'),
         # 2. hourly band: one to three digits a side, UNIT REQUIRED
-        '\$\s?\d{1,3}(\.\d{2})?\s*(-|\u2013|to)\s*\$?\s?\d{1,3}(\.\d{2})?\s*(/ ?hr\b|/ ?hour\b|per hour\b|an hour\b|hourly\b)'
+        ('(?i)\$\s?\d{1,3}(\.\d{2})?' + $dash + '\$?\s?\d{1,3}(\.\d{2})?\s*(/ ?hr\b|/ ?hour\b|per hour\b|an hour\b|hourly\b)'),
+        # 3. thousands written as k: $70k to $150k
+        ('\$\s?\d{2,3}(\.\d)?[kK]' + $dash + '\$?\s?\d{2,3}(\.\d)?[kK]\b')
     )
-
     foreach ($p in $patterns) {
         $m = [regex]::Match($Text, $p)
         if ($m.Success) {
             # trailing comma: [\d,] can swallow the one after "$180,000," in running prose
             return (($m.Value -replace '\s+', ' ').Trim() -replace '[,\s]+$', '')
         }
+    }
+
+    # 4. hourly band with the unit BEFORE it: "The hourly pay range ... is from $31.10 to $44.60"
+    $m = [regex]::Match($Text, '(?i)\bhourly (pay |wage |rate )?(range|rate|band)\b[^$]{0,40}(\$\s?\d{1,3}(\.\d{2})?' + $dash + '\$?\s?\d{1,3}(\.\d{2})?)')
+    if ($m.Success) { return (($m.Groups[3].Value -replace '\s+', ' ').Trim() + ' per hour') }
+
+    # 5. labelled pay range, cents, no unit: "Pay Range is $21.40-$33.80" (the unit is inferred later)
+    $m = [regex]::Match($Text, '(?i)\bpay (range|rate)\b[^$\d]{0,20}(\$\s?\d{1,3}\.\d{2}' + $dash + '\$?\s?\d{1,3}\.\d{2})(?!\s*(co-?pays?|deductibles?)\b)')
+    if ($m.Success) { return ($m.Groups[2].Value -replace '\s+', ' ').Trim() }
+
+    # 6. minimum and maximum on separate labelled lines (Workday "Pay Range Minimum:", iCIMS "Min / Max")
+    $fig = { param($n) '\$\s?(?<' + $n + '>\d{1,3}(,\d{3})*(\.\d{2})?)\s*(?<' + $n + 'Unit>annual(ly)?\b|/ ?yr\b\.?|/ ?hr\b\.?)?' }
+    $m = [regex]::Match($Text, '(?i)\bmin(imum)?\b[^$]{0,30}' + (& $fig 'lo') + '[\s\S]{0,80}?\bmax(imum)?\b[^$]{0,30}' + (& $fig 'hi'))
+    if ($m.Success) {
+        $unit = $m.Groups['loUnit'].Value + ' ' + $m.Groups['hiUnit'].Value
+        $unit = if ($unit -match '(?i)hr') { ' per hour' } elseif ($unit -match '(?i)yr|annual') { ' per year' } else { '' }
+        return ('${0} - ${1}{2}' -f $m.Groups['lo'].Value, $m.Groups['hi'].Value, $unit)
     }
     return ''
 }

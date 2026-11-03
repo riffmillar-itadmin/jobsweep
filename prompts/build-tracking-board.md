@@ -34,7 +34,9 @@ must_haves:
   - "<a skill, duty or condition the role must have>"
   -
 
-# Each one present raises the score.
+# Each one present raises the score. Say what counts for each, as a threshold
+# or an example: "strong benefits" with no definition gets credited on one card
+# and missed on a better one.
 nice_to_haves:
   - "<something that makes a role more attractive>"
   -
@@ -133,7 +135,8 @@ are state.
 - Read every `sweep-<date>-candidates.json`. Each holds an array of postings
   with `Company`, `Title`, `Location`, `Remote`, `Pay`, `Degree`,
   `NeedsLicence`, `Posted`, `ReqId`, `Source`, `Url`, `Reason` and `Content`
-  (the full posting text).
+  (the full posting text). `Remote` is missing for some providers: treat a
+  missing one as unknown and read `Content`.
 - A card's identity is **`Source` + `ReqId`**. The sweep never reports the
   same requisition twice, but if two files contain one, keep the earlier.
 - **Date added** is the `<date>` in the file name the posting came from.
@@ -161,7 +164,7 @@ Read `Content`, not just the title. For every posting record:
 - **Reasons**: one line per criterion that decided the score, each quoting
   the posting text it relied on. No quote, no claim.
 - **Needs review**: set it when the text is ambiguous, contradicts the sweep's
-  `Remote` flag, or a must-have can only be guessed at. Say what is unclear.
+  `Remote` flag, `Location` is blank, or a must-have can only be guessed at. Say what is unclear.
   Never guess to avoid setting it.
 - **Deal-breaker found**: create the card in **Passed**, with the quote as
   its note. It stays visible there, so a wrong call can be moved back.
@@ -176,6 +179,11 @@ show the original text on the card unchanged.
 
 Normalise both ends of a range; a single figure is both ends.
 
+- **Find the figures.** When `Pay` is blank, look for a pay range in
+  `Content` before treating it as unstated: older sweeps missed several common
+  shapes, such as a minimum and a maximum on separate lines. Use it as if it
+  were `Pay`. A lone figure, a sign-on bonus, a tuition cap or a placeholder
+  such as `$1 - $2` is not a pay range. `$95k` means 95,000.
 - **Find the unit first.** The sweep only captures hourly and yearly units,
   so when `Pay` has none, look for the same figures in `Content` and read the
   unit stated beside them ("per month", "weekly", "daily rate"). A unit found

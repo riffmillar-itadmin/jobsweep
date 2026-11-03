@@ -348,6 +348,23 @@ Check 'lone rate not a range' (Get-PayRange 'and $46/hr on W-2 with benefits') '
 Check 'tuition cap not pay'   (Get-PayRange 'will pay up to $5,000 annually for approved tuition') ''
 Check 'blank text safe'       (Get-PayRange '') ''
 
+Write-Host "`n-- PAY RANGE: shapes real sweeps left blank (added 2026-11-03) --"
+# A check of every real sweep found Pay blank on 47 postings that stated pay. Each case is
+# one shape that was missed; none of them ever produced a wrong figure, only an empty one.
+Check 'html em dash spans'    (Get-PayRange '<div class="pay-range"><span>$150,000</span><span class="divider">&mdash;</span><span>$190,000 USD</span></div>') ('$150,000 ' + [char]0x2014 + ' $190,000')
+Check 'k figures'             (Get-PayRange 'Salary range is $70k to $150k, with a midpoint of $110k.') '$70k to $150k'
+Check 'min max labelled yr'   (Get-PayRange "Pay Range Minimum:`n`$64,500.00 annual Pay Range Maximum:`n`$91,200.00 annual Other Compensation") '$64,500.00 - $91,200.00 per year'
+Check 'min max short hourly'  (Get-PayRange "Min`n`nUSD `$24.10/Hr.`n`nMax`n`nUSD `$29.90/Hr.`n`nQualifications") '$24.10 - $29.90 per hour'
+Check 'hourly unit first'     (Get-PayRange 'The hourly pay range for this position is from $31.10 to $44.60 and pay offered') '$31.10 to $44.60 per hour'
+Check 'pay range cents only'  (Get-PayRange 'Pay Range is $21.40-$33.80') '$21.40-$33.80'
+Check 'USD before each side'  (Get-PayRange 'Pay Range USD $18.00 - USD $21.00 /Hr. Overview') '$18.00 - USD $21.00 /Hr'
+# Still not pay: these sat in the same real postings and must stay blank.
+Check 'sign-on bonus not pay' (Get-PayRange 'Potentially up to $5,000 sign on bonus for qualified external candidates!') ''
+Check 'revenue not pay'       (Get-PayRange 'the platform processes over 110M transactions and $40B annually.') ''
+Check 'placeholder band'      (Get-PayRange '<span>$1</span><span class="divider">&mdash;</span><span>$2 USD</span>') ''
+Check 'open-ended figure'     (Get-PayRange 'The range for this position is from $120,000+ with offers contingent') ''
+Check 'copay still not pay'   (Get-PayRange 'Pay Range: a $5.00 to $10.00 copay applies') ''
+
 # ---- REMOTE STATED IN THE TITLE, added 2026-09-21 ------------------------
 # An employer filing a fully remote req against its out-of-state head office.
 Check 'head-office title rescue' (Test-LocationMatch 'Springfield, IL' 'Engineer, Endpoint - Remote').Ok $true
