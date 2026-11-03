@@ -113,7 +113,8 @@
     seeker in Westmark, with screenshots in the README. No code changes.
     1.4.0 (2026-11-03): Dayforce provider -- CSRF token and web session, paged
     search, pay from the detail call when the text gives none. Invoke-Json takes
-    -Headers and -WebSession. Test summary shows profiles and counts.
+    -Headers and -WebSession. Test summary shows profiles and counts. A -Source
+    with no matching profile entry is an error, not "No postings retrieved".
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -1849,7 +1850,15 @@ if (Test-Path $stateFile) {
 Write-Log "State: $($seen.Count) requisitions previously seen."
 
 $sources = $Config.Sources
-if ($Source) { $sources = $sources | Where-Object { $_.Provider -eq $Source } }
+if ($Source) {
+    $sources = @($sources | Where-Object { $_.Provider -eq $Source })
+    # A -Source that matches nothing used to end as "No postings retrieved", which
+    # reads like a quiet week. Say what is actually wrong.
+    if ($sources.Count -eq 0) {
+        Write-Log "No source in the profile uses Provider '$Source'. Add one to Sources in your local profile." 'ERROR'
+        Complete-Run; exit $script:ExitCode
+    }
+}
 
 $all = @()
 foreach ($src in $sources) {

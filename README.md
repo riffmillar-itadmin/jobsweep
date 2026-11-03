@@ -234,7 +234,8 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
   and fetches pay from the detail call only when the text gives none.
   `Invoke-Json` takes `-Headers` and `-WebSession`. The `-BothEditions` summary
   now shows the profiles used and the pass, fail and skipped counts for each
-  edition. 22 new regression cases (292).
+  edition. A `-Source` that matches no profile entry is now an error, not
+  "No postings retrieved". 22 new regression cases (292).
 - **1.3.12** (2026-11-03): an example tracking board,
   `docs/example-board.html`, for a fictional job seeker in Westmark, with two
   screenshots in the README's tracking-board section. Every name and figure on
