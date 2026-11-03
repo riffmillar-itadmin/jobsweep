@@ -38,7 +38,7 @@ That is what the test suite is for.
 | `JobSweep.local.psd1` | ⛔ **gitignored** | **Where you will go and who you are watching.** Geography, commute boundary, remote rules, and the employer list. |
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 258 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 270 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
 | `CLAUDE.md` | ✅ | Rules for Claude Code sessions in this repo. Personal ones go in a gitignored `CLAUDE.local.md`. |
@@ -203,6 +203,14 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.11** (2026-11-03): pay is read from five more shapes. A check of every
+  real sweep found `Pay` blank on 47 postings that stated it: HTML with an
+  `&mdash;` between the figures, a minimum and a maximum on separate lines,
+  `$70k to $150k`, an hourly band whose unit comes first, and `USD` before each
+  figure. Sign-on bonuses, revenue and placeholder bands still read as no pay,
+  and 12 new regression cases hold both sides. The tracking-board prompt now
+  reads a blank `Pay` from the posting text, flags a blank `Location` for
+  review, and asks for a threshold on each nice-to-have.
 - **1.3.10** (2026-10-31): the tracking-board prompt stores a Date posted on
   every card, and a filter that depends on today's date, such as "Posted this
   week", is worked out by the page each time it loads instead of being saved
