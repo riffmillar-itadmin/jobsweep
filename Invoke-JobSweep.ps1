@@ -108,6 +108,8 @@
     (k figures, Min/Max lines, unit-first and labelled hourly bands, USD before each
     figure); real sweeps had left Pay blank on 47 postings that stated it. The
     tracking-board prompt reads blank Pay from Content and flags a blank Location.
+    1.3.12 (2026-11-03): docs -- an example tracking board for a fictional job
+    seeker in Westmark, with screenshots in the README. No code changes.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -140,7 +142,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.3.11'
+$JobSweepVersion = '1.3.12'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo

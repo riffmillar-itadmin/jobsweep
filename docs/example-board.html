@@ -1,0 +1,1178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Example Job Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap">
+<style id="app-css">
+:root{
+  --paper:#EFF2EE; --surface:#FBFCFA; --surface-2:#E6EAE4;
+  --ink:#141B18; --ink-2:#3D4A45; --meta:#63716C; --rule:#D3DAD3;
+  --accent:#1E6B54; --on-accent:#F7FAF8; --accent-soft:#DCEAE2;
+  --rust:#A8501E; --rust-soft:#F2E2D6;
+  --slate:#4C6470; --slate-soft:#DEE6EA;
+  --gold:#8A6A12; --gold-soft:#F0E7CE;
+  --shadow:0 1px 2px rgba(20,27,24,.05), 0 6px 18px -12px rgba(20,27,24,.22);
+  --maxw:1040px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0F1513; --surface:#171F1C; --surface-2:#1F2926;
+    --ink:#E6EDE8; --ink-2:#B6C3BD; --meta:#8A9A94; --rule:#2A3733;
+    --accent:#5FBF9C; --on-accent:#0F1513; --accent-soft:#173129;
+    --rust:#E0925F; --rust-soft:#2E211A;
+    --slate:#8FB2C0; --slate-soft:#1B282D;
+    --gold:#D9B968; --gold-soft:#2C2515;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -14px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0F1513; --surface:#171F1C; --surface-2:#1F2926;
+  --ink:#E6EDE8; --ink-2:#B6C3BD; --meta:#8A9A94; --rule:#2A3733;
+  --accent:#5FBF9C; --on-accent:#0F1513; --accent-soft:#173129;
+  --rust:#E0925F; --rust-soft:#2E211A;
+  --slate:#8FB2C0; --slate-soft:#1B282D;
+  --gold:#D9B968; --gold-soft:#2C2515;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -14px rgba(0,0,0,.7);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Newsreader",Georgia,"Times New Roman",serif;
+  font-size:17px; line-height:1.55; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+.sans{font-family:"Archivo",system-ui,sans-serif}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+
+/* masthead */
+header.masthead{border-bottom:1px solid var(--rule);background:var(--surface)}
+.masthead .wrap{padding-top:44px;padding-bottom:30px}
+.eyebrow{
+  font-family:"Archivo",system-ui,sans-serif;
+  font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--accent);margin:0 0 14px;
+}
+h1{
+  font-family:"Archivo",system-ui,sans-serif;
+  font-weight:700;letter-spacing:-.025em;line-height:1.02;
+  font-size:clamp(2.1rem,5.2vw,3.35rem);margin:0 0 16px;text-wrap:balance;
+}
+.standfirst{font-size:1.075rem;color:var(--ink-2);max-width:62ch;margin:0 0 26px}
+
+/* pipeline counters */
+.pipeline{display:flex;flex-wrap:wrap;gap:0;border-top:1px solid var(--rule);padding-top:18px;align-items:flex-start}
+.pgroup{display:flex;flex-direction:column;gap:7px}
+.pgroup + .pgroup{margin-left:30px;padding-left:30px;border-left:1px solid var(--rule)}
+.pgroup .prow{display:flex;flex-wrap:wrap}
+.gcap{font-family:"Archivo",system-ui,sans-serif;font-size:9.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--meta);opacity:.85;white-space:nowrap}
+.pstat{padding-right:28px;margin-right:28px;border-right:1px solid var(--rule)}
+.pgroup .prow .pstat:last-child{border-right:0;margin-right:0;padding-right:0}
+.pstat:last-child{border-right:0;margin-right:0;padding-right:0}
+.pstat b{
+  display:block;font-family:"JetBrains Mono",ui-monospace,monospace;
+  font-size:1.5rem;font-weight:500;line-height:1.1;font-variant-numeric:tabular-nums;color:var(--ink);
+}
+.pstat span{
+  display:block;font-family:"Archivo",system-ui,sans-serif;
+  font-size:10.5px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--meta);margin-top:5px;
+}
+.pstat[data-k="applied"] b{color:var(--accent)}
+.pstat[data-k="interview"] b{color:var(--gold)}
+.pstat[data-k="nomatch"] b{color:var(--rust)}
+.tier > h2 .sortnote{font-weight:500;color:var(--meta);font-size:.95rem;letter-spacing:0}
+.emptymsg{font-size:.95rem;color:var(--meta);padding:6px 0 24px}
+
+/* deadline banner */
+.caveat{background:var(--surface-2);border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+.caveat .wrap{padding:22px 20px}
+.caveat h2{
+  font-family:"Archivo",system-ui,sans-serif;font-size:11.5px;font-weight:600;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--rust);margin:0 0 10px;
+}
+.caveat p{margin:0 0 9px;font-size:.95rem;color:var(--ink-2);max-width:78ch}
+.caveat p:last-child{margin-bottom:0}
+.caveat strong{color:var(--ink);font-weight:500}
+
+/* filter bar */
+.filterbar{
+  position:sticky;top:0;z-index:20;
+  background:color-mix(in srgb, var(--paper) 90%, transparent);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--rule);
+}
+.filterbar .wrap{padding-top:10px;padding-bottom:10px;display:flex;flex-direction:column;gap:8px}
+.barrow{display:flex;flex-wrap:wrap;gap:7px;align-items:center;width:100%}
+input.search{
+  flex:1 1 260px;min-width:0;max-width:420px;
+  font-family:"Archivo",system-ui,sans-serif;font-size:13px;
+  color:var(--ink);background:var(--surface);
+  border:1px solid var(--rule);border-radius:999px;padding:7px 14px;
+}
+input.search::placeholder{color:var(--meta)}
+input.search:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.sortlab{
+  font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:600;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--meta);
+}
+select.sortsel{
+  font-family:"Archivo",system-ui,sans-serif;font-size:12.5px;font-weight:600;
+  color:var(--ink-2);background:var(--surface);
+  border:1px solid var(--rule);border-radius:999px;padding:6px 10px;cursor:pointer;
+}
+select.sortsel:hover{border-color:var(--accent);color:var(--ink)}
+.filterbar .label{
+  font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:600;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--meta);margin-right:3px;
+}
+button.chip{
+  font-family:"Archivo",system-ui,sans-serif;font-size:12.5px;font-weight:600;
+  background:var(--surface);color:var(--ink-2);
+  border:1px solid var(--rule);border-radius:999px;
+  padding:6px 13px;cursor:pointer;transition:background .13s,color .13s,border-color .13s;
+}
+button.chip:hover{border-color:var(--accent);color:var(--ink)}
+button.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+button:focus-visible,a:focus-visible,textarea:focus-visible,summary:focus-visible{
+  outline:2px solid var(--accent);outline-offset:2px;
+}
+.barright{margin-left:auto;display:flex;align-items:center;gap:14px}
+.count{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:var(--meta);font-variant-numeric:tabular-nums}
+.savestate{
+  font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:600;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--meta);
+  display:flex;align-items:center;gap:6px;white-space:nowrap;
+}
+.savestate .dot{width:7px;height:7px;border-radius:50%;background:var(--meta);flex:none}
+.savestate[data-s="saving"]{color:var(--gold)} .savestate[data-s="saving"] .dot{background:var(--gold)}
+.savestate[data-s="saved"]{color:var(--accent)} .savestate[data-s="saved"] .dot{background:var(--accent)}
+.savestate[data-s="local"]{color:var(--rust)} .savestate[data-s="local"] .dot{background:var(--rust)}
+.savestate[data-s="conflict"]{color:var(--rust)} .savestate[data-s="conflict"] .dot{background:var(--rust)}
+
+/* sections */
+main .wrap{padding-top:36px;padding-bottom:20px}
+.tier{margin-bottom:44px}
+.tier > h2{
+  font-family:"Archivo",system-ui,sans-serif;
+  font-size:1.32rem;font-weight:700;letter-spacing:-.015em;margin:0 0 4px;
+}
+.tier > p.tiernote{margin:0 0 20px;font-size:.95rem;color:var(--meta);max-width:72ch}
+
+/* lead card */
+.lead{
+  position:relative;background:var(--surface);
+  border:1px solid var(--rule);border-left-width:4px;border-radius:3px;
+  padding:17px 20px 14px;margin-bottom:12px;box-shadow:var(--shadow);
+  transition:opacity .15s;
+}
+.lead[data-reach="walk"],.lead[data-reach="link"],.lead[data-reach="bus"]{border-left-color:var(--accent)}
+.lead[data-reach="long"]{border-left-color:var(--slate)}
+.lead[data-reach="hard"]{border-left-color:var(--rust)}
+.lead[data-reach="remote"],.lead[data-reach="usremote"]{border-left-color:var(--ink-2)}
+.lead[data-reach="twoline"]{border-left-color:var(--slate)}
+.lead[data-stage="closed"]{opacity:.45}
+.lead[data-stage="nomatch"]{opacity:.5}
+.lead[data-stage="notsel"]{opacity:.55}
+.lead[data-stage="applied"]{background:color-mix(in srgb, var(--accent-soft) 34%, var(--surface))}
+.lead[data-stage="interview"]{background:color-mix(in srgb, var(--gold-soft) 42%, var(--surface))}
+
+.lead .co{
+  font-family:"Archivo",system-ui,sans-serif;
+  font-size:11px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--accent);margin:0 0 5px;
+}
+.lead .co .ind{color:var(--meta);font-weight:500}
+.lead h3{
+  font-family:"Archivo",system-ui,sans-serif;
+  font-size:1.16rem;font-weight:600;letter-spacing:-.012em;line-height:1.25;
+  margin:0 0 10px;text-wrap:balance;
+}
+.lead h3 a{color:var(--ink);text-decoration:none;border-bottom:1.5px solid var(--accent-soft)}
+.lead h3 a:hover{border-bottom-color:var(--accent)}
+
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:11px}
+.tag{
+  font-family:"Archivo",system-ui,sans-serif;font-size:10.5px;font-weight:600;
+  letter-spacing:.07em;text-transform:uppercase;padding:3px 8px;border-radius:3px;
+  background:var(--surface-2);color:var(--meta);white-space:nowrap;
+}
+.tag.mode{background:var(--accent-soft);color:var(--accent)}
+.tag.fresh{background:var(--accent-soft);color:var(--accent)}
+.tag.check{background:var(--rust-soft);color:var(--rust)}
+.tag.type{background:var(--slate-soft);color:var(--slate)}
+.tag.pay{
+  background:transparent;border:1px solid var(--rule);color:var(--ink-2);
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:10.5px;
+  letter-spacing:0;text-transform:none;font-variant-numeric:tabular-nums;
+}
+
+.tag.deg{
+  background:transparent;border:1px dashed var(--rule);color:var(--meta);
+}
+.tag.deg.ok{border-style:solid;border-color:color-mix(in srgb, var(--accent) 40%, transparent);color:var(--accent)}
+.tag.deg.soft{border-style:solid;border-color:var(--rule);color:var(--ink-2)}
+.tag.deg.gate{border-style:solid;background:var(--rust-soft);border-color:var(--rust-soft);color:var(--rust)}
+
+.commute{display:flex;gap:9px;align-items:baseline;font-size:.93rem;color:var(--ink-2);margin:0 0 9px;max-width:74ch}
+.commute .ct{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;
+  font-weight:500;white-space:nowrap;padding-top:1px;
+}
+.lead[data-reach="walk"] .ct,.lead[data-reach="link"] .ct,.lead[data-reach="bus"] .ct{color:var(--accent)}
+.lead[data-reach="long"] .ct{color:var(--slate)}
+.lead[data-reach="hard"] .ct{color:var(--rust)}
+.lead[data-reach="remote"] .ct,.lead[data-reach="usremote"] .ct{color:var(--meta)}
+.lead[data-reach="twoline"] .ct{color:var(--slate)}
+.note{font-size:.9rem;color:var(--meta);margin:0 0 12px;max-width:76ch}
+.note.degnote{border-left:2px solid var(--rule);padding-left:10px;font-style:italic;margin-top:-4px}
+
+/* tracker row */
+.track{border-top:1px solid var(--rule);padding-top:11px;display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.stages{display:inline-flex;border:1px solid var(--rule);border-radius:4px;overflow:hidden;background:var(--paper)}
+.stages button{
+  font-family:"Archivo",system-ui,sans-serif;font-size:11px;font-weight:600;
+  letter-spacing:.06em;text-transform:uppercase;
+  background:transparent;border:0;border-right:1px solid var(--rule);
+  color:var(--meta);padding:6px 11px;cursor:pointer;transition:background .12s,color .12s;
+}
+.stages button:last-child{border-right:0}
+.stages button:hover{color:var(--ink);background:var(--surface-2)}
+.stages button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+.stages button[data-stage="interview"][aria-pressed="true"]{background:var(--gold);color:var(--on-accent)}
+.stages button[data-stage="closed"][aria-pressed="true"]{background:var(--meta);color:var(--on-accent)}
+.stages button[data-stage="nomatch"][aria-pressed="true"]{background:var(--rust);color:var(--on-accent)}
+.stages button[data-stage="notsel"][aria-pressed="true"]{background:var(--slate);color:var(--on-accent)}
+
+.stamp{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;color:var(--meta);font-variant-numeric:tabular-nums}
+.track .srclink{
+  font-family:"Archivo",system-ui,sans-serif;font-size:12px;font-weight:600;
+  color:var(--accent);text-decoration:none;margin-left:auto;
+}
+.track .srclink:hover{text-decoration:underline}
+.track .nolink{font-family:"Archivo",system-ui,sans-serif;font-size:12px;font-weight:600;color:var(--meta);margin-left:auto}
+button.notestoggle{
+  font-family:"Archivo",system-ui,sans-serif;font-size:11px;font-weight:600;
+  letter-spacing:.06em;text-transform:uppercase;
+  background:transparent;border:1px solid var(--rule);border-radius:4px;
+  color:var(--meta);padding:6px 10px;cursor:pointer;
+}
+button.notestoggle:hover{border-color:var(--accent);color:var(--ink)}
+button.notestoggle[data-has="1"]{border-color:var(--accent);color:var(--accent)}
+textarea.notes{
+  width:100%;margin-top:11px;min-height:66px;resize:vertical;
+  font-family:"Newsreader",Georgia,serif;font-size:.93rem;line-height:1.5;
+  color:var(--ink);background:var(--paper);
+  border:1px solid var(--rule);border-radius:4px;padding:9px 11px;
+}
+textarea.notes::placeholder{color:var(--meta)}
+
+/* reference */
+details.ref{
+  background:var(--surface);border:1px solid var(--rule);border-radius:3px;
+  margin-bottom:10px;
+}
+details.ref > summary{
+  font-family:"Archivo",system-ui,sans-serif;font-size:12px;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);
+  padding:15px 20px;cursor:pointer;list-style:none;display:flex;align-items:center;gap:10px;
+}
+details.ref > summary::-webkit-details-marker{display:none}
+details.ref > summary::before{
+  content:"+";font-family:"JetBrains Mono",monospace;color:var(--accent);
+  font-size:15px;line-height:1;flex:none;
+}
+details.ref[open] > summary::before{content:"\2212"}
+details.ref > summary:hover{color:var(--ink)}
+details.ref .refbody{padding:0 20px 16px}
+details.ref ul{margin:0;padding-left:20px}
+details.ref li{margin-bottom:8px;font-size:.94rem;color:var(--ink-2)}
+details.ref li b{color:var(--ink);font-weight:500}
+details.ref li a{color:var(--accent)}
+details.ref.dead li{color:var(--meta);font-size:.92rem}
+details.ref.dead li b{color:var(--ink-2)}
+
+.caveat details.log{background:transparent;border:0;border-top:1px solid var(--rule);border-radius:0;margin:14px 0 0;box-shadow:none}
+.caveat details.log > summary{
+  font-family:"Archivo",system-ui,sans-serif;font-size:11.5px;font-weight:600;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--meta);
+  padding:13px 0 11px;cursor:pointer;list-style:none;display:flex;align-items:center;gap:9px;
+}
+.caveat details.log > summary::-webkit-details-marker{display:none}
+.caveat details.log > summary::before{
+  content:"+";font-family:"JetBrains Mono",monospace;color:var(--rust);
+  font-size:15px;line-height:1;flex:none;
+}
+.caveat details.log[open] > summary::before{content:"\2212"}
+.caveat details.log > summary:hover{color:var(--ink)}
+.caveat details.log .logbody{padding:2px 0 4px}
+
+footer.end{border-top:1px solid var(--rule);background:var(--surface);margin-top:34px}
+footer.end .wrap{padding:26px 20px 40px}
+footer.end p{font-size:.9rem;color:var(--meta);margin:0 0 8px;max-width:76ch}
+
+@media (max-width:640px){
+  body{font-size:16px}
+  .filterbar{position:static;backdrop-filter:none;background:var(--paper)}
+  .masthead .wrap{padding-top:32px;padding-bottom:22px}
+  .pstat{padding-right:18px;margin-right:18px}
+  .pgroup + .pgroup{margin-left:0;padding-left:0;border-left:0;margin-top:16px}
+  .pipeline{flex-direction:column}
+  .track .srclink,.track .nolink{margin-left:0;width:100%}
+  .stages button{padding:6px 9px;font-size:10.5px}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+/* ---- v2: stages, scores, ended track, card editing ---- */
+/* long pay and work-mode text used to run off a phone screen; let tags wrap */
+.tag{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.lead[data-stage="passed"]{opacity:.5}
+.lead[data-stage="rejected"]{opacity:.55}
+.lead[data-stage="shortlisted"]{background:color-mix(in srgb, var(--slate-soft) 45%, var(--surface))}
+.lead[data-stage="offer"]{background:color-mix(in srgb, var(--accent-soft) 60%, var(--surface));border-left-color:var(--accent)}
+.stages button[data-stage="shortlisted"][aria-pressed="true"]{background:var(--slate);color:var(--on-accent)}
+.stages button[data-stage="offer"][aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+.stages button[data-stage="passed"][aria-pressed="true"]{background:var(--rust);color:var(--on-accent)}
+.stages button[data-stage="rejected"][aria-pressed="true"]{background:var(--slate);color:var(--on-accent)}
+.endstages{opacity:.8}
+.endstages button{font-size:10px;padding:5px 8px}
+.endedline{font-family:"Archivo",system-ui,sans-serif;font-size:12px;font-weight:600;color:var(--ink-2)}
+.endedline em{font-weight:500;color:var(--meta)}
+
+.scoretags{margin-top:-4px}
+.tag.score{background:var(--surface);border:1px solid var(--rule);color:var(--ink);font-family:"JetBrains Mono",ui-monospace,monospace;letter-spacing:0;text-transform:none}
+.tag.strong{background:var(--accent-soft);color:var(--accent)}
+.tag.review{background:var(--gold-soft);color:var(--gold)}
+.tag.deal{background:var(--rust-soft);color:var(--rust)}
+.tag.assumed{background:transparent;border:1px dashed var(--rule);color:var(--meta);text-transform:none;letter-spacing:.02em}
+.tag.is-edited::after{content:" \270E";}
+button.linkbtn{
+  font-family:"Archivo",system-ui,sans-serif;font-size:11.5px;font-weight:600;
+  background:none;border:0;padding:3px 2px;color:var(--accent);cursor:pointer;text-decoration:underline;
+}
+
+details.why{margin:-4px 0 12px}
+details.why > summary{
+  font-family:"Archivo",system-ui,sans-serif;font-size:11px;font-weight:600;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--meta);cursor:pointer;
+}
+details.why ul{margin:8px 0 0;padding-left:20px;font-size:.9rem;color:var(--ink-2)}
+details.why li{margin-bottom:4px}
+details.why li.quote{font-style:italic;color:var(--meta)}
+details.why li.rv{color:var(--gold)}
+
+details.endedtrack{border-top:2px solid var(--rule);margin-top:10px;padding-top:6px}
+details.endedtrack > summary{
+  list-style:none;cursor:pointer;display:flex;flex-wrap:wrap;align-items:baseline;gap:18px;
+  padding:14px 0;font-family:"Archivo",system-ui,sans-serif;
+}
+details.endedtrack > summary::-webkit-details-marker{display:none}
+details.endedtrack > summary::before{content:"+";font-family:"JetBrains Mono",monospace;color:var(--accent);font-size:16px}
+details.endedtrack[open] > summary::before{content:"\2212"}
+.etitle{font-size:1.32rem;font-weight:700;letter-spacing:-.015em}
+.ecount{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--meta)}
+.ecount b{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:1rem;font-weight:500;color:var(--ink);letter-spacing:0}
+.endgroup{margin-top:18px}
+
+.editpanel{margin-top:12px;border:1px solid var(--rule);border-radius:4px;background:var(--paper);padding:12px 14px}
+.ehint{font-size:.85rem;color:var(--meta);margin:0 0 10px}
+.erow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid var(--rule)}
+.elab{font-family:"Archivo",system-ui,sans-serif;font-size:12px;font-weight:600;color:var(--ink-2)}
+.edmark{font-style:normal;font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--gold)}
+.erow input[type=number],.erow input[type=date],.erow select{
+  font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:var(--ink);background:var(--surface);
+  border:1px solid var(--rule);border-radius:4px;padding:5px 8px;min-width:0;width:100%;
+}
+.erow input[type=checkbox]{justify-self:start;width:16px;height:16px;accent-color:var(--accent)}
+.eacts{display:flex;gap:8px;margin-top:12px}
+button.ebtn{
+  font-family:"Archivo",system-ui,sans-serif;font-size:12px;font-weight:600;
+  border:1px solid var(--rule);border-radius:4px;background:var(--surface);color:var(--ink-2);padding:7px 14px;cursor:pointer;
+}
+button.ebtn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+
+button.chip.custom{border-style:dashed}
+details.morefilters{position:relative}
+details.morefilters > summary{
+  list-style:none;cursor:pointer;font-family:"Archivo",system-ui,sans-serif;font-size:12px;font-weight:600;
+  color:var(--meta);padding:6px 10px;border:1px solid transparent;border-radius:999px;
+}
+details.morefilters > summary::-webkit-details-marker{display:none}
+details.morefilters > summary:hover{color:var(--ink);border-color:var(--rule)}
+.mfbody{
+  position:absolute;z-index:30;top:calc(100% + 6px);left:0;min-width:230px;
+  background:var(--surface);border:1px solid var(--rule);border-radius:6px;box-shadow:var(--shadow);padding:10px 12px;
+}
+.mfbody p{font-size:.82rem;color:var(--meta);margin:0 0 6px}
+.mfbody label{display:flex;gap:8px;align-items:center;font-family:"Archivo",system-ui,sans-serif;font-size:12.5px;color:var(--ink-2);padding:3px 0}
+.mfbody em{font-style:normal;font-size:10px;color:var(--meta);text-transform:uppercase;letter-spacing:.08em}
+@media (max-width:640px){
+  .erow{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .erow > :last-child{grid-column:1 / -1}
+  .mfbody{left:auto;right:0}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="application/json" id="app-state">{"v": 2, "marks": {"Example Health::Endpoint Engineer (Intune)": {"s": "interview", "changed": "2026-10-14", "applied": "2026-10-15", "n": "Recruiter screen Oct 24. Panel interview Nov 5, two hours, with the endpoint team. Bring the Autopilot rollout story."}, "Example Fintech::Endpoint Security Analyst": {"s": "applied", "changed": "2026-10-20", "applied": "2026-10-22", "n": "Applied with the security-focused resume. No reply yet; follow up Nov 5."}, "Example Bank::Microsoft 365 Administrator": {"s": "shortlisted", "changed": "2026-10-17", "applied": "2026-10-18", "n": "Recruiter called Oct 27: shortlisted, degree can be waived with experience. Hiring manager call to be scheduled."}, "Example Cloud Co::Desktop Support Engineer II": {"s": "applied", "changed": "2026-10-23", "applied": "2026-10-24", "n": "Applied Oct 24."}, "Example Schools::Technology Support Technician": {"s": "todo", "changed": "2026-10-31"}, "Example Biotech::IT Support Specialist": {"s": "todo", "changed": "2026-10-30"}, "Example Legal::Systems Administrator": {"s": "todo", "changed": "2026-10-28"}, "Example Manufacturing::Desktop Technician (6-month contract)": {"s": "applied", "changed": "2026-10-21", "applied": "2026-10-21", "n": "Agency submitted me Oct 21."}, "Example Health::Service Desk Lead": {"s": "passed", "changed": "2026-10-14", "n": "Passed: people management and weekends. The endpoint role at the same employer is the better fit.", "from": "todo"}, "Example Bank::Intune Engineer": {"s": "rejected", "changed": "2026-10-03", "applied": "2026-10-04", "n": "Rejected Oct 16: filled internally.", "from": "applied"}, "Example Biotech::Lab Systems Analyst": {"s": "closed", "changed": "2026-09-29", "from": "todo"}}, "savedAt": "2026-11-02T22:00:00.000Z"}</script>
+<script type="application/json" id="app-leads">[{"tier": 1, "co": "Example Health", "ind": "Healthcare — regional hospital system", "type": "Direct", "title": "Endpoint Engineer (Intune)", "mode": "Hybrid — Harborview, 3 days onsite", "reach": "link", "ct": "rail · 18 min", "verify": false, "commute": "Harbor Line from Old Town to Medical Center, then a 4-minute walk. Three days onsite, two at home.", "date": "Posted Oct 14", "pay": "$88,000 – $112,000 a year", "deg": "equiv", "degnote": "“Bachelor’s degree or equivalent combination of education and experience.”", "src": "Example Health careers", "url": "https://example.com/careers/endpoint-engineer-intune", "note": "The closest fit on the board. Intune, Autopilot and Windows 11 rollout are the first three duties, and the team is moving 9,000 devices off on-premises imaging this year."}, {"tier": 1, "co": "Example Fintech", "ind": "Financial technology — payments", "type": "Direct", "title": "Endpoint Security Analyst", "mode": "Remote — Westmark", "reach": "remote", "ct": "remote · WM", "verify": false, "commute": "Remote within Westmark, company laptop. One onsite week a year in Harborview.", "date": "Posted Oct 20", "pay": "$105,000 – $130,000 a year", "deg": "none", "src": "Example Fintech careers", "url": "https://example.com/careers/endpoint-security-analyst", "note": "Defender for Endpoint and Intune compliance policies. Less hands-on than the Example Health role, but the pay is the best on the board."}, {"tier": 1, "co": "Example Bank", "ind": "Banking — community bank", "type": "Direct", "title": "Microsoft 365 Administrator", "mode": "Onsite — Harborview, Old Town", "reach": "walk", "ct": "walk · 9 min", "verify": false, "commute": "Nine-minute walk from Old Town. Fully onsite, standard hours.", "date": "Posted Oct 17", "pay": "$95,000 – $120,000 a year", "deg": "hard", "degnote": "“Bachelor’s degree in Information Technology required.” No equivalency clause.", "src": "Example Bank careers", "url": "https://example.com/careers/microsoft-365-administrator", "note": "Exchange Online, Teams and SharePoint administration. The degree line is the only thing in the way, and the recruiter said it is negotiable."}, {"tier": 1, "co": "Example Cloud Co", "ind": "Software — cloud services", "type": "Direct", "title": "Desktop Support Engineer II", "mode": "Remote (US)", "reach": "usremote", "ct": "remote · US", "verify": false, "commute": "Remote anywhere in the US. Pacific hours, no on-call.", "date": "Posted Oct 23", "pay": "$31.10 – $44.60 per hour", "deg": "pref", "degnote": "“Degree preferred.”", "src": "Example Cloud Co careers", "url": "https://example.com/careers/desktop-support-engineer-ii", "note": "Tier-2 support for a remote engineering staff on Windows and macOS."}, {"tier": 1, "co": "Example Schools", "ind": "Education — public school district", "type": "Direct", "title": "Technology Support Technician", "mode": "Onsite — Harborview", "reach": "bus", "ct": "bus · 22 min", "verify": false, "commute": "Route 7 from Old Town, one seat. Work moves between three school sites, all on the same route.", "date": "Posted Oct 31", "pay": "$58,000 – $72,000 a year", "deg": "hs", "degnote": "“High school diploma or GED.”", "src": "Example Schools careers", "url": "https://example.com/careers/technology-support-technician", "note": "Lower pay, but a public-sector pension and summers on a lighter schedule."}, {"tier": 2, "co": "Example Biotech", "ind": "Life sciences — research labs", "type": "Direct", "title": "IT Support Specialist", "mode": "Onsite — Brookfield", "reach": "twoline", "ct": "rail · 35 min", "verify": true, "commute": "Brookfield Line, one seat to Brookfield Center. The campus is either beside the station or a 25-minute bus beyond it.", "date": "Posted Oct 30", "pay": "$24.10 – $29.90 per hour", "deg": "none", "src": "Example Biotech careers", "url": "https://example.com/careers/it-support-specialist", "note": "CHECK: confirm the worksite is within reach of your usual transit route. The posting names Brookfield but not which campus."}, {"tier": 2, "co": "Example Legal", "ind": "Legal — regional law firm", "type": "Direct", "title": "Systems Administrator", "mode": "Hybrid — Millbrook", "reach": "long", "ct": "bus · 50 min", "verify": false, "commute": "Two buses to Millbrook, about 50 minutes. Two days onsite.", "date": "Posted Oct 28", "deg": "equiv", "degnote": "“Bachelor’s or equivalent experience.”", "src": "Example Legal careers", "url": "https://example.com/careers/systems-administrator", "note": "No pay range stated, which Westmark law requires on a posting. Ask before spending time on it."}, {"tier": 3, "co": "Example Manufacturing", "ind": "Manufacturing — industrial equipment", "type": "Contract", "title": "Desktop Technician (6-month contract)", "mode": "Onsite — Harborview, Port District", "reach": "link", "ct": "rail · 15 min", "verify": false, "commute": "Harbor Line to Port District. Onsite every day for the length of the contract.", "date": "Posted Oct 21", "pay": "$26.00 – $30.00 per hour", "deg": "none", "src": "Example Manufacturing careers", "url": "https://example.com/careers/desktop-technician-6-month-contract", "note": "A Windows 11 refresh of 800 PCs. Contract-to-hire is mentioned but not promised."}, {"tier": 1, "co": "Example Health", "ind": "Healthcare — regional hospital system", "type": "Direct", "title": "Service Desk Lead", "mode": "Onsite — Harborview", "reach": "link", "ct": "rail · 18 min", "verify": false, "commute": "Same campus as the endpoint role. Fully onsite, rotating weekends.", "date": "Posted Oct 14", "pay": "$72,000 – $86,000 a year", "deg": "none", "src": "Example Health careers", "url": "https://example.com/careers/service-desk-lead", "note": "Manages a team of eight, with rotating weekend cover."}, {"tier": 1, "co": "Example Bank", "ind": "Banking — community bank", "type": "Direct", "title": "Intune Engineer", "mode": "Hybrid — Harborview", "reach": "walk", "ct": "walk · 9 min", "verify": false, "commute": "Same building as the 365 role. Two days onsite.", "date": "Posted Oct 3", "pay": "$100,000 – $125,000 a year", "deg": "pref", "degnote": "“Degree preferred.”", "src": "Example Bank careers", "url": "https://example.com/careers/intune-engineer", "note": "Filled internally, the recruiter said."}, {"tier": 2, "co": "Example Biotech", "ind": "Life sciences — research labs", "type": "Direct", "title": "Lab Systems Analyst", "mode": "Onsite — Brookfield", "reach": "twoline", "ct": "rail · 35 min", "verify": false, "commute": "Brookfield Line, one seat.", "date": "Posted Sep 29", "pay": "$68,000 – $84,000 a year", "deg": "equiv", "src": "Example Biotech careers", "url": "https://example.com/careers/lab-systems-analyst", "note": "The posting came down before I applied."}]</script>
+<script type="application/json" id="app-derived">{"Example Health::Endpoint Engineer (Intune)": {"added": "2026-10-14", "addedApprox": false, "payLo": 88000, "payHi": 112000, "payUnit": "yearly", "payAssumed": false, "score": 94, "reasons": ["Meets all three must-haves", "Nice-to-haves (6 of 7): Microsoft stack at the centre, target industry, walk, rail, one bus or remote, pay top of $95,000 or more, strong benefits stated, hybrid or remote option"], "quote": "Lead the move of 9,000 devices from on-premises imaging to Autopilot", "review": null, "deal": []}, "Example Fintech::Endpoint Security Analyst": {"added": "2026-10-20", "addedApprox": false, "payLo": 105000, "payHi": 130000, "payUnit": "yearly", "payAssumed": false, "score": 89, "reasons": ["Meets all three must-haves", "Nice-to-haves (5 of 7): Microsoft stack at the centre, no degree gate, walk, rail, one bus or remote, pay top of $95,000 or more, hybrid or remote option"], "quote": "Own device compliance policy across a fully remote workforce", "review": null, "deal": []}, "Example Bank::Microsoft 365 Administrator": {"added": "2026-10-17", "addedApprox": false, "payLo": 95000, "payHi": 120000, "payUnit": "yearly", "payAssumed": false, "score": 83, "reasons": ["Meets all three must-haves", "Nice-to-haves (4 of 7): Microsoft stack at the centre, walk, rail, one bus or remote, pay top of $95,000 or more, strong benefits stated"], "quote": "Bachelor’s degree in Information Technology required", "review": null, "deal": ["dg"]}, "Example Cloud Co::Desktop Support Engineer II": {"added": "2026-10-23", "addedApprox": false, "payLo": 64688, "payHi": 92768, "payUnit": "hourly", "payAssumed": false, "score": 83, "reasons": ["Meets all three must-haves", "Nice-to-haves (4 of 7): Microsoft stack at the centre, no degree gate, walk, rail, one bus or remote, hybrid or remote option"], "quote": "Support a distributed team of 1,200 engineers on Windows and macOS", "review": null, "deal": []}, "Example Schools::Technology Support Technician": {"added": "2026-10-31", "addedApprox": false, "payLo": 58000, "payHi": 72000, "payUnit": "yearly", "payAssumed": false, "score": 83, "reasons": ["Meets all three must-haves", "Nice-to-haves (4 of 7): target industry, no degree gate, walk, rail, one bus or remote, strong benefits stated"], "quote": "Imaging and repair for 6,000 student and staff devices", "review": null, "deal": []}, "Example Biotech::IT Support Specialist": {"added": "2026-10-30", "addedApprox": false, "payLo": 50128, "payHi": 62192, "payUnit": "hourly", "payAssumed": false, "score": 83, "reasons": ["Meets all three must-haves", "Nice-to-haves (4 of 7): Microsoft stack at the centre, target industry, no degree gate, strong benefits stated"], "quote": "Support lab instruments and the Windows PCs that run them", "review": "Brookfield is only partly in reach, and the posting does not say which campus.", "deal": []}, "Example Legal::Systems Administrator": {"added": "2026-10-28", "addedApprox": false, "payLo": null, "payHi": null, "payUnit": "unknown", "payAssumed": false, "score": 71, "reasons": ["Meets all three must-haves", "Nice-to-haves (2 of 7): Microsoft stack at the centre, hybrid or remote option"], "quote": "Administer Windows Server, Active Directory and the document system", "review": null, "deal": []}, "Example Manufacturing::Desktop Technician (6-month contract)": {"added": "2026-10-21", "addedApprox": false, "payLo": 54080, "payHi": 62400, "payUnit": "hourly", "payAssumed": false, "score": 77, "reasons": ["Meets all three must-haves", "Nice-to-haves (3 of 7): Microsoft stack at the centre, no degree gate, walk, rail, one bus or remote"], "quote": "Refresh 800 shop-floor and office PCs to Windows 11", "review": null, "deal": []}, "Example Health::Service Desk Lead": {"added": "2026-10-14", "addedApprox": false, "payLo": 72000, "payHi": 86000, "payUnit": "yearly", "payAssumed": false, "score": 89, "reasons": ["Meets all three must-haves", "Nice-to-haves (5 of 7): Microsoft stack at the centre, target industry, no degree gate, walk, rail, one bus or remote, strong benefits stated"], "quote": "Supervise a team of eight service desk analysts", "review": null, "deal": ["pm"]}, "Example Bank::Intune Engineer": {"added": "2026-10-03", "addedApprox": false, "payLo": 100000, "payHi": 125000, "payUnit": "yearly", "payAssumed": false, "score": 94, "reasons": ["Meets all three must-haves", "Nice-to-haves (6 of 7): Microsoft stack at the centre, no degree gate, walk, rail, one bus or remote, pay top of $95,000 or more, strong benefits stated, hybrid or remote option"], "quote": "Design and run the bank’s Intune configuration", "review": null, "deal": []}, "Example Biotech::Lab Systems Analyst": {"added": "2026-09-29", "addedApprox": false, "payLo": 68000, "payHi": 84000, "payUnit": "yearly", "payAssumed": false, "score": 71, "reasons": ["Meets all three must-haves", "Nice-to-haves (2 of 7): target industry, no degree gate"], "quote": "Validate lab software against regulated procedures", "review": null, "deal": []}}</script>
+<script id="app-js">
+(function(){
+"use strict";
+
+var LEADS = JSON.parse(document.getElementById("app-leads").textContent);
+var STATE = JSON.parse(document.getElementById("app-state").textContent);
+var DERIVED = {};
+try{ DERIVED = JSON.parse(document.getElementById("app-derived").textContent) || {}; }catch(e){}
+if(!STATE || typeof STATE !== "object") STATE = {v:1, marks:{}};
+if(!STATE.marks) STATE.marks = {};
+
+var LS_KEY = "example-jobboard-v2";
+var UI_KEY = "example-jobboard-ui-v2";
+var UI = {filters:[], hidden:[], sort:"added", stage:"", q:"", ended:false};
+try{ var savedUI = JSON.parse(localStorage.getItem(UI_KEY) || "null"); if(savedUI) UI = Object.assign(UI, savedUI); }catch(e){}
+function saveUI(){ try{ localStorage.setItem(UI_KEY, JSON.stringify(UI)); }catch(e){} }
+try{
+  var local = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+  if(local && local.marks){
+    var localNewer = !STATE.savedAt || (local.savedAt||"") > STATE.savedAt;
+    Object.keys(local.marks).forEach(function(k){
+      if(!STATE.marks[k] || localNewer) STATE.marks[k] = local.marks[k];
+    });
+  }
+}catch(e){}
+
+/* ---------- stages ----------
+   The progress track, then the Ended track. Ended cards remember the stage
+   they left in m.from; m.fi marks a "from" inferred during the v2 migration. */
+var TRACK = [
+  {k:"todo",        label:"New"},
+  {k:"applied",     label:"Applied"},
+  {k:"shortlisted", label:"Shortlisted"},
+  {k:"interview",   label:"Interviewing"},
+  {k:"offer",       label:"Offer"}
+];
+var ENDED = [
+  {k:"passed",   label:"Passed",   who:"You chose not to pursue it, or withdrew"},
+  {k:"rejected", label:"Rejected", who:"The employer said no"},
+  {k:"closed",   label:"Closed",   who:"The posting closed, was filled or expired"}
+];
+var LEGACY = {nomatch:"passed", notsel:"rejected"};
+function isEnded(s){ return s === "passed" || s === "rejected" || s === "closed"; }
+function stageLabel(k){
+  var all = TRACK.concat(ENDED);
+  for(var i = 0; i < all.length; i++) if(all[i].k === k) return all[i].label;
+  return k;
+}
+function migrate(m){
+  if(LEGACY[m.s]) m.s = LEGACY[m.s];
+  /* "Posted this week" is worked out from dates on every load, so an old
+     hand-set value for it would only get in the way. */
+  if(m.o && Object.prototype.hasOwnProperty.call(m.o, "f_week")){
+    delete m.o.f_week;
+    if(!Object.keys(m.o).length) delete m.o;
+  }
+  if(isEnded(m.s) && !m.from){ m.from = m.applied ? "applied" : "todo"; m.fi = 1; }
+  return m;
+}
+Object.keys(STATE.marks).forEach(function(k){ migrate(STATE.marks[k]); });
+STATE.v = 2;
+
+var REACH_LABEL = {walk:"Walkable", link:"Harbor Line / bus", bus:"Bus / bike", twoline:"Brookfield Line — one seat", remote:"Remote (WM)", usremote:"Remote (US)", hard:"Out of area", long:"Longer commute", unknown:"Location unstated"};
+var TIERS = [
+  {n:1, h:"Harborview — walk, the Harbor Line or one bus",
+       note:"Direct employers inside the city, plus remote roles. Start here."},
+  {n:2, h:"Brookfield and Millbrook — check the worksite",
+       note:"Only part of each town is in reach. The sweep flags these with a CHECK, so confirm the street address before you apply."},
+  {n:3, h:"Contract, contract-to-hire and part-time",
+       note:"W-2 contract and agency work in Harborview. Agencies fill faster than direct employers, so call even when the posting is a little junior."}
+];
+
+var MIN_PAY = 70000;      // the working floor; the target is higher
+var STRONG  = 83;         // strong_match_threshold: four of the seven nice-to-haves
+
+var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function today(){ var d = new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function pretty(iso){
+  if(!iso) return "";
+  var p = iso.split("-");
+  if(p.length !== 3) return iso;
+  return MONTHS[parseInt(p[1],10)-1] + " " + parseInt(p[2],10);
+}
+function esc(s){
+  return String(s == null ? "" : s).replace(/[&<>"]/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];
+  });
+}
+function money(n){ return n == null ? "" : "$" + Math.round(n).toLocaleString("en-US"); }
+
+function keyOf(l){ return l.co + "::" + l.title; }
+function markOf(l){
+  var k = keyOf(l);
+  if(!STATE.marks[k]) STATE.marks[k] = {s:"todo"};
+  return STATE.marks[k];
+}
+function D(l){ return DERIVED[keyOf(l)] || {}; }
+
+/* ---------- posted this week ----------
+   Worked out on every load, never stored: a saved yes/no goes stale the day
+   after it is written. The posted date comes from the card's date text
+   ("Posted Oct 22", "Reposted Oct 21"); a card without one falls back to its
+   date added. */
+function postedISO(l){
+  var added = D(l).added || "";
+  var m = /\b(?:Re)?[Pp]osted (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* (\d{1,2})\b/.exec(l.date || "");
+  if(!m || !added) return added;
+  var y = parseInt(added.slice(0, 4), 10), mo = MONTHS.indexOf(m[1]) + 1;
+  if(mo > parseInt(added.slice(5, 7), 10)) y -= 1;   // posted in December, added in January
+  return y + "-" + String(mo).padStart(2, "0") + "-" + String(parseInt(m[2], 10)).padStart(2, "0");
+}
+function daysAgo(iso){
+  if(!iso) return null;
+  var p = iso.split("-"), t = today().split("-");
+  return Math.round((Date.UTC(+t[0], t[1]-1, +t[2]) - Date.UTC(+p[0], p[1]-1, +p[2])) / 86400000);
+}
+function postedThisWeek(l){ var n = daysAgo(postedISO(l)); return n != null && n >= 0 && n <= 6; }
+
+/* ---------- card edits ----------
+   Claude's judgements are the base values; the user's edits are overrides in
+   m.o, so Revert can always restore the original. */
+var DEG_LABEL = {
+  none:   ["No degree asked",        "ok"],
+  hs:     ["HS diploma / GED",       "ok"],
+  pref:   ["Degree preferred only",  "ok"],
+  either: ["HS + experience path",   "ok"],
+  equiv:  ["Bachelor’s or equivalent experience", "soft"],
+  hard:   ["Bachelor’s required",  "gate"]
+};
+var NO_GATE = ["none","hs","pref","either"];
+
+var FIELDS = [
+  {f:"payLo",       label:"Pay, annual low",      type:"number"},
+  {f:"payHi",       label:"Pay, annual high",     type:"number"},
+  {f:"payUnit",     label:"Pay unit",             type:"select", opts:["hourly","daily","weekly","monthly","yearly","unknown"]},
+  {f:"arrangement", label:"Work arrangement",     type:"select", opts:["remote","hybrid","onsite"]},
+  {f:"degree",      label:"Degree required",      type:"bool"},
+  {f:"licence",     label:"Licence required",     type:"bool"},
+  {f:"score",       label:"Score (0–100)",   type:"number"},
+  {f:"review",      label:"Needs review",         type:"bool"},
+  {f:"f_core",   label:"Filter: Harborview proper",       type:"bool"},
+  {f:"f_contract",  label:"Filter: Contract & part-time", type:"bool"},
+  {f:"f_asset",     label:"Filter: Asset & licensing",    type:"bool"}
+];
+function base(l, f){
+  var d = D(l);
+  switch(f){
+    case "payLo":   return d.payLo == null ? null : d.payLo;
+    case "payHi":   return d.payHi == null ? null : d.payHi;
+    case "payUnit": return d.payUnit || (d.payHi == null ? "unknown" : "yearly");
+    case "arrangement":
+      if(l.reach === "remote" || l.reach === "usremote") return "remote";
+      if(/hybrid/i.test(l.mode || "")) return "hybrid";
+      if(/remote/i.test(l.mode || "")) return "remote";
+      return "onsite";
+    case "degree":  return NO_GATE.indexOf(l.deg || "") === -1;
+    case "licence": return (d.deal || []).indexOf("dl") > -1;
+    case "score":   return d.score == null ? null : d.score;
+    case "review":  return !!d.review;
+    case "f_core":  return ["walk","link","bus","remote"].indexOf(l.reach) > -1;
+    case "f_contract": return /Contract|Per diem/i.test(l.type || "");
+    case "f_asset":    return !!l.sam;
+    case "f_week":     return postedThisWeek(l);
+  }
+  return null;
+}
+function edited(l, f){ var m = markOf(l); return !!(m.o && Object.prototype.hasOwnProperty.call(m.o, f)); }
+function eff(l, f){ return edited(l, f) ? markOf(l).o[f] : base(l, f); }
+
+/* ---------- self-publishing ---------- */
+var artifactNs = null, wantPublish = false, saveTimer = null, publishing = false;
+
+function setSave(s, text){
+  var el = document.getElementById("savestate");
+  if(!el) return;
+  el.setAttribute("data-s", s);
+  el.innerHTML = '<span class="dot"></span>' + esc(text);
+}
+
+function jsonIsland(id, obj){
+  var body = JSON.stringify(obj).replace(/</g, "\\u003c");
+  return '<script type="application/json" id="' + id + '">' + body + '<\/script>';
+}
+
+function buildDoc(){
+  var css = document.getElementById("app-css").textContent;
+  var leads = document.getElementById("app-leads").textContent.replace(/</g, "\\u003c");
+  var derived = document.getElementById("app-derived").textContent.replace(/</g, "\\u003c");
+  var js = document.getElementById("app-js").textContent;
+  return '<!doctype html>\n<html lang="en">\n<head>\n'
+    + '<meta charset="utf-8">\n'
+    + '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+    + '<title>Example Job Board<\/title>\n'
+    + '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
+    + '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
+    + '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap">\n'
+    + '<style id="app-css">' + css + '<\/style>\n'
+    + '<\/head>\n<body>\n'
+    + '<div id="root"><\/div>\n'
+    + jsonIsland("app-state", STATE) + '\n'
+    + '<script type="application/json" id="app-leads">' + leads + '<\/script>\n'
+    + '<script type="application/json" id="app-derived">' + derived + '<\/script>\n'
+    + '<script id="app-js">' + js + '<\/script>\n'
+    + '<\/body>\n<\/html>';
+}
+
+function cacheLocal(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(STATE)); }catch(e){}
+}
+
+function scheduleSave(){
+  STATE.savedAt = new Date().toISOString();
+  cacheLocal();
+  if(!artifactNs){ setSave("local", "Saved on this device only"); return; }
+  wantPublish = true;
+  setSave("saving", "Saving…");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flush, 1400);
+}
+
+function flush(){
+  if(!artifactNs || !wantPublish || publishing) return;
+  publishing = true; wantPublish = false;
+  artifactNs.publish(buildDoc()).then(function(){
+    publishing = false;
+    setSave("saved", "Saved");
+    if(wantPublish) flush();
+  }).catch(function(err){
+    publishing = false;
+    var code = err && err.code;
+    if(code === "conflict"){
+      setSave("conflict", "Reloading — edited elsewhere");
+    }else if(code === "not_granted" || code === "not_writer"){
+      artifactNs = null;
+      setSave("local", "Read-only — saved on this device");
+    }else{
+      setSave("local", "Not saved to the page — kept on this device");
+    }
+  });
+}
+
+if(window.claude && typeof window.claude.use === "function"){
+  window.claude.use("artifact").then(function(ns){
+    if(!ns) return;
+    artifactNs = ns;
+    setSave("saved", "Saved");
+  }).catch(function(){});
+}
+window.addEventListener("beforeunload", function(){ if(wantPublish) flush(); });
+
+/* ---------- render ---------- */
+var openEdit = {};      // card keys whose edit panel is open (not saved)
+
+function counts(){
+  var c = {};
+  TRACK.concat(ENDED).forEach(function(s){ c[s.k] = 0; });
+  LEADS.forEach(function(l){ var s = markOf(l).s; c[s] = (c[s] || 0) + 1; });
+  return c;
+}
+
+function stampFor(l, m){
+  var d = D(l), parts = [];
+  if(d.added) parts.push("Added " + (d.addedApprox ? "~" : "") + pretty(d.added));
+  if(m.applied) parts.push("Applied " + pretty(m.applied));
+  return parts.join(" · ");
+}
+
+function scoreTags(l){
+  var s = eff(l, "score"), out = [];
+  if(s != null) out.push('<span class="tag score' + (edited(l,"score") ? ' is-edited' : '') + '">Score ' + esc(s) + '</span>');
+  if(s != null && s >= STRONG) out.push('<span class="tag strong">Strong match</span>');
+  if(eff(l, "review")) out.push('<span class="tag review">Needs review</span><button type="button" class="linkbtn" data-act="edit">Edit to review</button>');
+  (D(l).deal || []).forEach(function(c){
+    var t = {dl:"Licence required", pm:"People management", cl:"Clearance", dg:"Hard degree gate", xs:"Won’t hire WM", xa:"Excluded area"}[c];
+    if(t) out.push('<span class="tag deal" title="Deal-breaker noted">' + esc(t) + '</span>');
+  });
+  return out.join("");
+}
+
+function editHTML(l, m){
+  var rows = FIELDS.map(function(fd){
+    var v = eff(l, fd.f), input;
+    if(fd.type === "number"){
+      input = '<input type="number" name="' + fd.f + '" value="' + (v == null ? "" : esc(v)) + '" inputmode="numeric">';
+    }else if(fd.type === "select"){
+      input = '<select name="' + fd.f + '">' + fd.opts.map(function(o){
+        return '<option value="' + o + '"' + (v === o ? ' selected' : '') + '>' + o + '</option>';
+      }).join("") + '</select>';
+    }else{
+      input = '<input type="checkbox" name="' + fd.f + '"' + (v ? ' checked' : '') + '>';
+    }
+    return '<label class="erow"><span class="elab">' + esc(fd.label)
+      + (edited(l, fd.f) ? ' <em class="edmark">edited</em>' : '') + '</span>' + input
+      + (edited(l, fd.f) ? '<button type="button" class="linkbtn" data-act="revert" data-field="' + fd.f + '">Revert</button>' : '<span></span>')
+      + '</label>';
+  }).join("");
+  rows += '<label class="erow"><span class="elab">Date applied</span><input type="date" name="applied" value="' + esc(m.applied || "") + '"><span></span></label>';
+  return '<div class="editpanel"><p class="ehint">Company, title, location, link and posting text stay as published. Edits here override Claude’s values and can be reverted.</p>'
+    + rows
+    + '<div class="eacts"><button type="button" class="ebtn primary" data-act="esave">Save</button><button type="button" class="ebtn" data-act="ecancel">Cancel</button></div></div>';
+}
+
+function cardHTML(l){
+  var m = markOf(l), d = D(l), key = keyOf(l);
+  var dateClass = l.urgent ? "tag check" : (postedThisWeek(l) ? "tag fresh" : "tag");
+  var unit = eff(l, "payUnit");
+  var assumed = d.payAssumed && !edited(l, "payUnit") && unit !== "unknown";
+  var tags = [
+    '<span class="tag mode">' + esc(l.mode) + '</span>',
+    l.type ? '<span class="tag type">' + esc(l.type) + '</span>' : '',
+    '<span class="tag">' + esc(REACH_LABEL[l.reach]) + '</span>',
+    '<span class="' + dateClass + '">' + esc(l.date) + '</span>',
+    l.verify ? '<span class="tag check">Verify before applying</span>' : '',
+    l.pay ? '<span class="tag pay">' + esc(l.pay) + '</span>' : '',
+    assumed ? '<span class="tag assumed" title="Unit not stated; inferred from the size of the figures">assumed ' + esc(unit) + '</span>' : '',
+    (DEG_LABEL[l.deg]
+      ? '<span class="tag deg ' + DEG_LABEL[l.deg][1] + '"'
+          + (l.degnote ? ' title="' + esc(l.degnote) + '"' : '')
+          + '>' + DEG_LABEL[l.deg][0] + '</span>'
+      : '')
+  ].join("");
+
+  var ended = isEnded(m.s);
+  var trackBtns = TRACK.map(function(s){
+    return '<button type="button" data-act="stage" data-stage="' + s.k + '" aria-pressed="' +
+      (m.s === s.k) + '">' + esc(s.label) + '</button>';
+  }).join("");
+  var endBtns = ENDED.map(function(s){
+    return '<button type="button" data-act="end" data-stage="' + s.k + '" aria-pressed="' +
+      (m.s === s.k) + '" title="' + esc(s.who) + '">' + esc(s.label) + '</button>';
+  }).join("");
+  var endedLine = ended
+    ? '<span class="endedline">' + esc(stageLabel(m.s)) + ' — from ' + esc(stageLabel(m.from || "todo"))
+        + (m.fi ? ' <em>(inferred)</em>' : '') + '</span>'
+        + '<button type="button" class="linkbtn" data-act="back">Move back to ' + esc(stageLabel(m.from || "todo")) + '</button>'
+    : '';
+
+  var why = (d.reasons || []).map(function(r){ return '<li>' + esc(r) + '</li>'; }).join("")
+    + (d.quote ? '<li class="quote">“' + esc(d.quote) + '”</li>' : '')
+    + (eff(l, "review") && d.review ? '<li class="rv">Needs review: ' + esc(d.review) + '</li>' : '');
+
+  var stamp = stampFor(l, m);
+  var hasNotes = !!(m.n && m.n.trim());
+
+  return '<article class="lead" data-reach="' + esc(l.reach) + '" data-stage="' + esc(m.s) +
+      '" data-q="' + esc(((l.co||"")+" "+(l.title||"")+" "+(l.ind||"")+" "+(l.src||"")+" "+(l.mode||"")).toLowerCase()) +
+      '" data-key="' + esc(key) + '">'
+    + '<p class="co">' + esc(l.co) + ' <span class="ind">&middot; ' + esc(l.ind) + '</span></p>'
+    + '<h3>' + (l.url ? '<a href="' + esc(l.url) + '" target="_blank" rel="noopener">' + esc(l.title) + '</a>' : esc(l.title)) + '</h3>'
+    + '<div class="tags">' + tags + '</div>'
+    + '<div class="tags scoretags">' + scoreTags(l) + '</div>'
+    + '<p class="commute"><span class="ct">' + esc(l.ct) + '</span><span>' + esc(l.commute) + '</span></p>'
+    + (l.note ? '<p class="note">' + esc(l.note) + '</p>' : '')
+    + (l.degnote ? '<p class="note degnote">' + esc(l.degnote) + '</p>' : '')
+    + (why ? '<details class="why"><summary>Why this score</summary><ul>' + why + '</ul></details>' : '')
+    + '<div class="track">'
+      + (ended ? endedLine : '<span class="stages">' + trackBtns + '</span>')
+      + '<span class="stages endstages" aria-label="End">' + endBtns + '</span>'
+      + (stamp ? '<span class="stamp">' + esc(stamp) + '</span>' : '')
+      + '<button type="button" class="notestoggle" data-act="notes" data-has="' + (hasNotes ? 1 : 0) + '">'
+        + (hasNotes ? 'Notes' : '+ Note') + '</button>'
+      + '<button type="button" class="notestoggle" data-act="edit" aria-expanded="' + !!openEdit[key] + '">Edit</button>'
+      + (l.url
+          ? '<a class="srclink" href="' + esc(l.url) + '" target="_blank" rel="noopener">' + esc(l.src) + ' &rarr;</a>'
+          : '<span class="nolink">No direct link found</span>')
+    + '</div>'
+    + (openEdit[key] ? editHTML(l, m) : '')
+    + '<textarea class="notes" placeholder="Contact name, next step, what you sent…"'
+      + (hasNotes ? '' : ' hidden') + '>' + esc(m.n || "") + '</textarea>'
+    + '</article>';
+}
+
+function refSection(title, cls, items){
+  return '<details class="ref ' + cls + '"><summary>' + esc(title) + '</summary>'
+    + '<div class="refbody"><ul>' + items.map(function(i){ return '<li>' + i + '</li>'; }).join("") + '</ul></div></details>';
+}
+
+/* ---------- sorting ---------- */
+var SORTS = [
+  ["added",   "Date added"],
+  ["pay",     "Pay"],
+  ["applied", "Date applied"],
+  ["score",   "Score"],
+  ["co",      "Company A–Z"],
+  ["tier",    "Commute tier"]
+];
+function byAdded(a, b){ return String(D(b).added || "").localeCompare(String(D(a).added || "")); }
+function sortLeads(list){
+  var mode = UI.sort, val;
+  if(mode === "pay")     val = function(l){ return eff(l, "payHi"); };
+  if(mode === "applied") val = function(l){ return markOf(l).applied || null; };
+  if(mode === "score")   val = function(l){ return eff(l, "score"); };
+  return list.slice().sort(function(a, b){
+    if(mode === "co"){
+      var c = String(a.co).localeCompare(String(b.co), "en", {sensitivity:"base"});
+      return c || byAdded(a, b);
+    }
+    if(val){
+      var x = val(a), y = val(b);
+      if(x == null && y != null) return 1;           // no value: last
+      if(y == null && x != null) return -1;
+      if(x != null && y != null && x !== y) return x < y ? 1 : -1;
+    }
+    return byAdded(a, b);
+  });
+}
+
+function boardHTML(){
+  var active = LEADS.filter(function(l){ return !isEnded(markOf(l).s); });
+  var ended  = LEADS.filter(function(l){ return isEnded(markOf(l).s); });
+  var html = "";
+  if(UI.sort === "tier"){
+    html += TIERS.map(function(t){
+      var items = sortLeads(active.filter(function(l){ return l.tier === t.n; }));
+      if(!items.length) return "";
+      return '<section class="tier" data-tier="' + t.n + '"><h2>' + esc(t.h) + '</h2>'
+        + '<p class="tiernote">' + esc(t.note) + '</p>' + items.map(cardHTML).join("") + '</section>';
+    }).join("");
+  }else{
+    var label = SORTS.filter(function(s){ return s[0] === UI.sort; })[0];
+    html += '<section class="tier" data-tier="track"><h2>In progress <span class="sortnote">— sorted by ' + esc(label ? label[1].toLowerCase() : "date added") + '</span></h2>'
+      + '<p class="tiernote">New → Applied → Shortlisted → Interviewing → Offer.</p>'
+      + sortLeads(active).map(cardHTML).join("") + '</section>';
+  }
+  var c = counts();
+  html += '<details class="endedtrack" id="endedtrack"' + (UI.ended ? ' open' : '') + '><summary>'
+    + '<span class="etitle">Ended</span>'
+    + ENDED.map(function(s){ return '<span class="ecount" data-k="' + s.k + '"><b>' + c[s.k] + '</b> ' + esc(s.label) + '</span>'; }).join("")
+    + '</summary>'
+    + ENDED.map(function(s){
+        var items = sortLeads(ended.filter(function(l){ return markOf(l).s === s.k; }));
+        return '<section class="tier endgroup" data-tier="' + s.k + '"><h2>' + esc(s.label) + ' <span class="sortnote">— ' + esc(s.who.toLowerCase()) + '</span></h2>'
+          + (items.length ? items.map(cardHTML).join("") : '<p class="emptymsg">None.</p>') + '</section>';
+      }).join("")
+    + '</details>';
+  return html;
+}
+
+function render(){
+  var c = counts();
+  var html = ''
+  + '<header class="masthead"><div class="wrap">'
+    + '<p class="eyebrow">IT job search &middot; example board &middot; updated Nov 2, 2026 &middot; every name and figure is invented</p>'
+    + '<h1>Example Job Board</h1>'
+    + '<p class="standfirst">Endpoint, desktop and Microsoft 365 roles in Harborview and along the Brookfield Line &mdash; direct, contract and remote. Move a lead through the stages and the page saves itself.</p>'
+    + '<div class="pipeline">'
+      + '<div class="pgroup"><span class="gcap">Progress</span><div class="prow">'
+        + TRACK.map(function(s){ return '<div class="pstat" data-k="' + s.k + '"><b>' + c[s.k] + '</b><span>' + esc(s.label) + '</span></div>'; }).join("")
+      + '</div></div>'
+      + '<div class="pgroup"><span class="gcap">Ended</span><div class="prow">'
+        + ENDED.map(function(s){ return '<div class="pstat" data-k="' + s.k + '"><b>' + c[s.k] + '</b><span>' + esc(s.label) + '</span></div>'; }).join("")
+      + '</div></div>'
+      + '<div class="pgroup"><span class="gcap">&nbsp;</span><div class="prow">'
+        + '<div class="pstat"><b>' + LEADS.length + '</b><span>Total leads</span></div>'
+      + '</div></div>'
+    + '</div>'
+  + '</div></header>'
+
+  + '<section class="caveat"><div class="wrap">'
+    + '<h2>How this board is screened</h2>'
+    + '<p><strong>This is an example.</strong> J. Seeker, Westmark, Harborview, Brookfield, Millbrook and every employer below are fictional, and so is every posting, pay figure and note. The page is the kind <code>prompts/build-tracking-board.md</code> builds; the data on it was written for this example.</p>'
+    + '<p><strong>What is in scope.</strong> <em>Remote anywhere in the US, or onsite within one seat of Harborview.</em> A remote posting that will not hire Westmark residents is dropped. Brookfield and Millbrook are only partly in reach, so their postings carry a check before you apply.</p>'
+    + '<p><strong>How pay is screened.</strong> $70,000 is the floor: a range meets it when its top does, and an unstated range never does. Hourly figures are converted at 2,080 hours a year.</p>'
+  + '</div></section>'
+
+  + '<nav class="filterbar"><div class="wrap">'
+    + '<div class="barrow">'
+      + '<input class="search" id="q" type="search" placeholder="Search employer or job title…" aria-label="Search employer or job title" autocomplete="off">'
+      + '<label class="sortlab" for="sort">Sort</label>'
+      + '<select class="sortsel" id="sort">'
+        + SORTS.map(function(s){ return '<option value="' + s[0] + '">' + s[1] + '</option>'; }).join("")
+      + '</select>'
+      + '<label class="sortlab" for="stagesel">Stage</label>'
+      + '<select class="sortsel" id="stagesel">'
+        + '<option value="">All stages</option>'
+        + TRACK.map(function(s){ return '<option value="' + s.k + '">' + s.label + '</option>'; }).join("")
+      + '</select>'
+      + '<span class="barright">'
+        + '<span class="count" id="count"></span>'
+        + '<span class="savestate" id="savestate" data-s="idle"><span class="dot"></span>Local only</span>'
+      + '</span>'
+    + '</div>'
+    + '<div class="barrow" id="chiprow">' + chipsHTML() + '</div>'
+  + '</div></nav>'
+
+  + '<main><div class="wrap" id="board"></div>'
+
+  + '<div class="wrap" style="padding-top:0">'
+    + refSection("Boards read in full \u2014 employer by employer", "", [
+        '<b>Example Health</b> 212 postings, <b>Example Bank</b> 48, <b>Example Cloud Co</b> 96 &mdash; every title read, not only the first page.',
+        '<b>Example Biotech</b> 31 postings &mdash; one support role, in Brookfield, flagged to check the worksite.',
+        '<b>Example Legal</b>, <b>Example Fintech</b> and <b>Example Manufacturing</b> &mdash; small boards, read in full.'
+      ])
+    + refSection("What the screen dropped", "dead", [
+        '<b>Outside the commute boundary (6 postings):</b> Springfield, Rivertown and Lakeside. These are the towns <code>CommuteExclude</code> names.',
+        '<b>Remote that excludes Westmark (2 postings):</b> both said they cannot hire in Westmark, so <code>RemoteBlock</code> removed them.',
+        '<b>Physically demanding (1 posting):</b> a 75 lb lifting requirement, above the profile&rsquo;s 50 lb limit.'
+      ])
+  + '</div></main>'
+
+  + '<footer class="end"><div class="wrap">'
+    + '<p>Sources: the example profile&rsquo;s seven employers, read through their own applicant-tracking systems by <code>Invoke-JobSweep.ps1</code>.</p>'
+    + '<p>Commute estimates are door-to-door from Old Town, Harborview, by the Harbor Line, the Brookfield Line, bus or bike. They are planning estimates, not schedules.</p>'
+  + '</div></footer>';
+
+  document.getElementById("root").innerHTML = html;
+  document.getElementById("board").innerHTML = boardHTML();
+  var qEl = document.getElementById("q"); if(qEl && UI.q) qEl.value = UI.q;
+  var sEl = document.getElementById("sort"); if(sEl) sEl.value = UI.sort;
+  var gEl = document.getElementById("stagesel"); if(gEl) gEl.value = UI.stage;
+  applyFilter();
+  setSave(artifactNs ? "saved" : "local", artifactNs ? "Saved" : "Saved on this device only");
+}
+
+/* ---------- filters ----------
+   Toggle buttons that combine with AND. Default buttons can be hidden; hidden
+   ones are listed under More filters so they can come back. */
+var FILTERS = [
+  {k:"remote",    label:"Remote",             test:function(l){ return eff(l, "arrangement") === "remote"; }},
+  {k:"paystated", label:"Pay stated",         test:function(l){ return eff(l, "payHi") != null; }},
+  {k:"minpay",    label:"Meets minimum pay",  test:function(l){ var h = eff(l, "payHi"); return h != null && h >= MIN_PAY; }},  // a range meets it when its top does; unknown never does
+  {k:"strong",    label:"Strong match",       test:function(l){ var s = eff(l, "score"); return s != null && s >= STRONG; }},
+  {k:"review",    label:"Needs review",       test:function(l){ return !!eff(l, "review"); }},
+  {k:"nodeg",     label:"No degree required", test:function(l){ return !eff(l, "degree"); }},
+  {k:"core",   label:"Harborview proper",       custom:true, test:function(l){ return !!eff(l, "f_core"); }},
+  {k:"contract",  label:"Contract & part-time", custom:true, test:function(l){ return !!eff(l, "f_contract"); }},
+  {k:"asset",     label:"Asset & licensing",    custom:true, test:function(l){ return !!eff(l, "f_asset"); }},
+  {k:"week",      label:"Posted this week",     custom:true, test:function(l){ return postedThisWeek(l); }}
+];
+function chipsHTML(){
+  var shown = FILTERS.filter(function(f){ return UI.hidden.indexOf(f.k) === -1; });
+  return '<span class="label">Show</span>'
+    + shown.map(function(f){
+        return '<button class="chip' + (f.custom ? ' custom' : '') + '" data-filter="' + f.k + '" aria-pressed="' + (UI.filters.indexOf(f.k) > -1) + '">' + esc(f.label) + '</button>';
+      }).join("")
+    + '<button class="chip" data-filter="ended" aria-pressed="' + !!UI.ended + '">Show ended</button>'
+    + '<details class="morefilters"><summary>More filters</summary><div class="mfbody">'
+      + '<p>Choose which buttons appear on the bar.</p>'
+      + FILTERS.map(function(f){
+          return '<label><input type="checkbox" data-showfilter="' + f.k + '"' + (UI.hidden.indexOf(f.k) === -1 ? ' checked' : '') + '> ' + esc(f.label) + (f.custom ? ' <em>custom</em>' : '') + '</label>';
+        }).join("")
+    + '</div></details>';
+}
+
+/* The open state applyFilter last gave the Ended track. A search can open it
+   without changing UI.ended, so the toggle listener uses this to tell the
+   board's own opening from the user's. */
+var endedOpenSet = null;
+var endedFoldedFor = null;   // a search the user folded Ended away during
+
+function applyFilter(){
+  var activeHits = 0, endedHits = 0, byKey = {};
+  LEADS.forEach(function(l){ byKey[keyOf(l)] = l; });
+  var active = FILTERS.filter(function(f){ return UI.filters.indexOf(f.k) > -1 && UI.hidden.indexOf(f.k) === -1; });
+  Array.prototype.forEach.call(document.querySelectorAll(".lead"), function(card){
+    var l = byKey[card.getAttribute("data-key")], ok = !!l;
+    if(ok && UI.stage) ok = markOf(l).s === UI.stage;
+    for(var i = 0; ok && i < active.length; i++) ok = active[i].test(l);
+    if(ok && UI.q) ok = (card.getAttribute("data-q") || "").indexOf(UI.q) > -1;
+    card.hidden = !ok;
+    if(ok){ if(isEnded(markOf(l).s)) endedHits++; else activeHits++; }
+  });
+  Array.prototype.forEach.call(document.querySelectorAll(".tier"), function(sec){
+    var leads = sec.querySelectorAll(".lead");
+    if(leads.length) sec.hidden = !Array.prototype.some.call(leads, function(x){ return !x.hidden; });
+  });
+  // A search that finds an ended card opens the Ended track for as long as the
+  // search lasts; clearing it restores the saved preference.
+  var showEnded = !!UI.ended || (!!UI.q && endedHits > 0 && UI.q !== endedFoldedFor);
+  var shown = activeHits + (showEnded ? endedHits : 0);
+  var et = document.getElementById("endedtrack");
+  if(et){ endedOpenSet = showEnded; et.open = showEnded; et.hidden = !!UI.stage; }
+  var el = document.getElementById("count");
+  if(el) el.textContent = shown + " of " + LEADS.length + " shown";
+  var board = document.getElementById("board");
+  var msg = document.getElementById("emptymsg");
+  var text = "";
+  if(activeHits === 0 && endedHits > 0 && !UI.stage){
+    text = (showEnded ? 'No cards in progress match' : 'Nothing in progress matches')
+      + (UI.q ? ' “' + UI.q + '”' : '') + '; '
+      + endedHits + ' ended card' + (endedHits === 1 ? ' does' : 's do')
+      + (showEnded ? ' — shown under Ended below.' : ' — open Ended below to see ' + (endedHits === 1 ? 'it' : 'them') + '.');
+  }else if(shown === 0){
+    text = UI.q ? 'Nothing matches “' + UI.q + '” with the current filters.' : 'Nothing matches the current filters.';
+  }
+  if(text){
+    if(!msg){ msg = document.createElement("p"); msg.id = "emptymsg"; msg.className = "emptymsg"; board.insertBefore(msg, board.firstChild); }
+    msg.textContent = text;
+    msg.hidden = false;
+  } else if(msg){ msg.hidden = true; }
+}
+
+function updateCounts(){
+  var c = counts();
+  TRACK.concat(ENDED).forEach(function(s){
+    var el = document.querySelector('.pstat[data-k="' + s.k + '"] b');
+    if(el) el.textContent = c[s.k];
+  });
+}
+
+function rerender(){
+  var y = window.scrollY;
+  document.getElementById("board").innerHTML = boardHTML();
+  updateCounts();
+  applyFilter();
+  window.scrollTo(0, y);
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click", function(e){
+  var chip = e.target.closest && e.target.closest(".filterbar .chip");
+  if(chip){
+    var f = chip.getAttribute("data-filter");
+    if(f === "ended"){ UI.ended = !UI.ended; chip.setAttribute("aria-pressed", String(UI.ended)); }
+    else{
+      var i = UI.filters.indexOf(f);
+      if(i > -1) UI.filters.splice(i, 1); else UI.filters.push(f);
+      chip.setAttribute("aria-pressed", String(i === -1));
+    }
+    saveUI();
+    applyFilter();
+    return;
+  }
+
+  var btn = e.target.closest && e.target.closest("[data-act]");
+  if(!btn) return;
+  var card = btn.closest(".lead");
+  if(!card) return;
+  var key = card.getAttribute("data-key");
+  var l = LEADS.filter(function(x){ return keyOf(x) === key; })[0];
+  if(!l) return;
+  var m = markOf(l), act = btn.getAttribute("data-act");
+
+  if(act === "stage"){
+    var next = btn.getAttribute("data-stage");
+    m.s = (m.s === next && next !== "todo") ? "todo" : next;
+    delete m.from; delete m.fi;
+    m.changed = today();
+    if(m.s === "applied" && !m.applied) m.applied = today();
+    rerender(); scheduleSave(); return;
+  }
+  if(act === "end"){
+    var to = btn.getAttribute("data-stage");
+    if(!isEnded(m.s)){ m.from = m.s; delete m.fi; }
+    m.s = to;
+    m.changed = today();
+    rerender(); scheduleSave(); return;
+  }
+  if(act === "back"){
+    m.s = m.from || "todo";
+    delete m.from; delete m.fi;
+    m.changed = today();
+    rerender(); scheduleSave(); return;
+  }
+  if(act === "notes"){
+    var ta = card.querySelector("textarea.notes");
+    ta.hidden = !ta.hidden;
+    if(!ta.hidden) ta.focus();
+    return;
+  }
+  if(act === "edit"){
+    openEdit[key] = !openEdit[key];
+    rerender(); return;
+  }
+  if(act === "ecancel"){
+    delete openEdit[key];
+    rerender(); return;
+  }
+  if(act === "revert"){
+    var fld = btn.getAttribute("data-field");
+    if(m.o){ delete m.o[fld]; if(!Object.keys(m.o).length) delete m.o; }
+    rerender(); scheduleSave(); return;
+  }
+  if(act === "esave"){
+    var panel = card.querySelector(".editpanel");
+    FIELDS.forEach(function(fd){
+      var el = panel.querySelector('[name="' + fd.f + '"]'), v;
+      if(fd.type === "number") v = el.value === "" ? null : Number(el.value);
+      else if(fd.type === "bool") v = el.checked;
+      else v = el.value;
+      var b = base(l, fd.f);
+      if(v === b || (v == null && b == null)){ if(m.o) delete m.o[fd.f]; }
+      else { if(!m.o) m.o = {}; m.o[fd.f] = v; }
+    });
+    if(m.o && !Object.keys(m.o).length) delete m.o;
+    var ap = panel.querySelector('[name="applied"]').value;
+    if(ap) m.applied = ap; else delete m.applied;
+    delete openEdit[key];
+    rerender(); scheduleSave(); return;
+  }
+});
+
+document.addEventListener("change", function(e){
+  var t = e.target;
+  if(t && t.id === "sort"){ UI.sort = t.value; saveUI(); rerender(); return; }
+  if(t && t.id === "stagesel"){ UI.stage = t.value; saveUI(); applyFilter(); return; }
+  if(t && t.getAttribute && t.getAttribute("data-showfilter")){
+    var k = t.getAttribute("data-showfilter"), i = UI.hidden.indexOf(k);
+    if(t.checked && i > -1) UI.hidden.splice(i, 1);
+    if(!t.checked && i === -1) UI.hidden.push(k);
+    saveUI();
+    var row = document.getElementById("chiprow");
+    row.innerHTML = chipsHTML();
+    row.querySelector(".morefilters").open = true;
+    applyFilter();
+  }
+});
+
+document.addEventListener("toggle", function(e){
+  if(e.target && e.target.id === "endedtrack"){
+    if(e.target.open === endedOpenSet) return;          // applyFilter's own change, not the user's
+    if(!e.target.open && UI.q && !UI.ended){ endedFoldedFor = UI.q; applyFilter(); return; }  // folded during a search: leave the preference alone
+    UI.ended = e.target.open; saveUI();
+    var chip = document.querySelector('.chip[data-filter="ended"]');
+    if(chip) chip.setAttribute("aria-pressed", String(UI.ended));
+    applyFilter();
+  }
+}, true);
+
+var noteTimer = null;
+document.addEventListener("input", function(e){
+  if(e.target && e.target.id === "q"){ UI.q = e.target.value.trim().toLowerCase(); saveUI(); applyFilter(); return; }
+  if(!e.target.classList || !e.target.classList.contains("notes")) return;
+  var card = e.target.closest(".lead");
+  var key = card.getAttribute("data-key");
+  var m = STATE.marks[key] || (STATE.marks[key] = {s:"todo"});
+  m.n = e.target.value;
+  var toggle = card.querySelector('[data-act="notes"]');
+  var has = !!(m.n && m.n.trim());
+  toggle.setAttribute("data-has", has ? "1" : "0");
+  toggle.textContent = has ? "Notes" : "+ Note";
+  cacheLocal();                       // instant, no reload
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(function(){
+    if(document.activeElement === e.target) return;   // still typing — wait for blur
+    scheduleSave();
+  }, 2500);
+});
+
+document.addEventListener("blur", function(e){
+  if(e.target && e.target.classList && e.target.classList.contains("notes")){
+    clearTimeout(noteTimer);
+    scheduleSave();
+  }
+}, true);
+
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape" && e.target && e.target.id === "q"){ e.target.value = ""; UI.q = ""; saveUI(); applyFilter(); }
+});
+
+render();
+})();
+</script>
+</body>
+</html>
