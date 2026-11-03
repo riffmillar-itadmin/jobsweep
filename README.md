@@ -38,7 +38,7 @@ That is what the test suite is for.
 | `JobSweep.local.psd1` | ⛔ **gitignored** | **Where you will go and who you are watching.** Geography, commute boundary, remote rules, and the employer list. |
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 292 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 314 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
 | `CLAUDE.md` | ✅ | Rules for Claude Code sessions in this repo. Personal ones go in a gitignored `CLAUDE.local.md`. |
@@ -63,7 +63,8 @@ cd jobsweep
 # 2. Make your own geography and employer list.
 Copy-Item JobSweep.local.example.psd1 JobSweep.local.psd1
 #    ...edit it: LocationInclude, CommuteExclude, real ATS tokens in Sources,
-#    and optionally OutputRoot.
+#    ClearanceScreen (will you take a job that needs a clearance you don't
+#    hold?), and optionally OutputRoot.
 
 # 3. Point the suite at your profile to see what your own rules do. Checks that
 #    name the example's fictional towns are skipped and counted; assert your own
@@ -107,6 +108,15 @@ city at all — *"Greater Metro Area"*, *"Bay Region"*. Left alone those either
 match `LocationInclude` on a substring and pass unflagged, or match nothing and
 are dropped; either way the screening is silently wrong, so they are flagged in
 both directions.
+
+**Clearances**: `ClearanceScreen` in your local profile answers one question:
+will you take a job that needs an active Secret, Top Secret or TS/SCI clearance
+you don't already hold? `'drop'` screens out postings that require one, `'check'`
+(the default) keeps them with a `CHECK` note, and `'off'` turns the screen off.
+A posting that offers a path to a clearance, such as *"ability to obtain"* or
+*"must obtain within 90 days"*, or only prefers one, is always kept with a
+`CHECK` note. "Secret" counts only beside the word clearance, so *"trade
+secrets"* is not a hit.
 
 ## Tracking board (optional)
 
@@ -199,8 +209,8 @@ version, the profiles it ran against, and its pass, fail and skipped counts.
 ```text
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  292    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  292    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  314    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  314    0       0 PASS
 ```
 
 GitHub Actions runs the same `-BothEditions` check on every push to `main`
@@ -228,6 +238,12 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.5.0** (2026-11-03): a clearance screen. `ClearanceScreen` in the local
+  profile is `'drop'`, `'check'` (the default) or `'off'`, and the example profile
+  asks it as a question. A posting that requires an active Secret, Top Secret or
+  TS/SCI clearance is dropped or flagged to match; one that offers a path to a
+  clearance, or only prefers one, is always kept with a `CHECK` note. A misspelt
+  value stops the run. 22 new regression cases (314).
 - **1.4.0** (2026-11-03): a Dayforce provider (`jobs.dayforcehcm.com`). It
   fetches a CSRF token in a web session, pages the search 25 at a time, reads
   the full description and every location (a virtual location reads as Remote),

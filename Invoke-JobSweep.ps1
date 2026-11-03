@@ -115,6 +115,8 @@
     search, pay from the detail call when the text gives none. Invoke-Json takes
     -Headers and -WebSession. Test summary shows profiles and counts. A -Source
     with no matching profile entry is an error, not "No postings retrieved".
+    1.5.0 (2026-11-03): clearance screen. ClearanceScreen = drop / check / off in
+    the local profile; a path to a clearance, or a preference, is always a CHECK.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -147,7 +149,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.4.0'
+$JobSweepVersion = '1.5.0'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -315,7 +317,7 @@ function Merge-JobSweepProfile {
         [string[]] $KnownKeys = @(
             'TitleInclude','TitleProtect','TitleExclude',
             'LocationExclude','CommuteExclude','LocationInclude',
-            'RemoteBlock','LiftingLimitLb','Sources','OutputRoot'
+            'RemoteBlock','LiftingLimitLb','ClearanceScreen','Sources','OutputRoot'
         )
     )
 
@@ -349,6 +351,12 @@ function Merge-JobSweepProfile {
     # TitleInclude empty, Test-TitleMatch then matches nothing, and the run reports
     # zero candidates and a normal-looking quiet day. That is a silent wrong answer,
     # which is the worst failure class this toolset has shipped.
+    # A misspelt mode would otherwise fall through to the default with no word said.
+    if ($merged.ContainsKey('ClearanceScreen') -and $merged.ClearanceScreen -notin @('drop', 'check', 'off')) {
+        throw ("ClearanceScreen must be 'drop', 'check' or 'off', not '{0}'. Checked: {1}" -f `
+               $merged.ClearanceScreen, ($ProfilePath -join ', '))
+    }
+
     $missing = @($RequireKeys | Where-Object {
         -not $merged.ContainsKey($_) -or @($merged[$_]).Count -eq 0 })
     if ($missing.Count -gt 0) {
@@ -554,6 +562,75 @@ function Test-LicenceRequired {
     param([string]$Text)
     if ([string]::IsNullOrWhiteSpace($Text)) { return $false }
     return ($Text -match "(?i)(driver'?s?\s+licen[sc]e|valid\s+licen[sc]e\s+to\s+drive|driving\s+record|driving\s+history|reliable\s+transportation)")
+}
+
+function Test-ClearanceRequired {
+    <# Screens postings that need a Secret, Top Secret or TS/SCI clearance. Added
+       2026-11-03 (1.5.0), after a Dayforce board with hundreds of cleared roles.
+
+       Whether a clearance requirement is a deal-breaker is personal, so the
+       profile decides with ClearanceScreen:
+         'drop'  -- a posting that REQUIRES one is screened out
+         'check' -- it is kept with a CHECK note (the default)
+         'off'   -- no screening
+       A posting that offers a PATH to a clearance ("ability to obtain", "must
+       obtain within 90 days", "will sponsor") or only prefers one is never
+       dropped: it gets a CHECK note whatever the setting, because that is a door,
+       not a wall.
+
+       Read sentence by sentence. "Secret" and "Top Secret" count only beside the
+       word clearance (or clearable, polygraph), so "trade secrets" is not a hit;
+       TS/SCI counts on its own. A sentence that says no clearance is needed is
+       ignored. Returns objects with Level 'out' or 'check' and a Why. #>
+    param([string]$Text, [string]$Mode = '')
+    $hits = @()
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $hits }
+
+    # Resolved here, not in a param default -- see Test-PhysicalDemand.
+    if (-not $Mode) {
+        $Mode = if ($Config -and $Config.ContainsKey('ClearanceScreen') -and $Config.ClearanceScreen) {
+                    [string]$Config.ClearanceScreen } else { 'check' }
+    }
+    if ($Mode -eq 'off') { return $hits }
+
+    $tsSci   = '(?i)\bts\s*/\s*sci\b|\bts-sci\b|\btop\s+secret\s*/\s*sci\b'
+    $level   = '(?i)\b(top\s+secret|secret)\b'
+    $context = '(?i)clearanc|clearable|polygraph|\bpoly\b|security\s+investigation'
+    $negated = '(?i)\b(no|not|without)\b[^.]{0,30}\bclearance\b[^.]{0,20}\b(required|needed|necessary)\b|\bdoes\s+not\s+require\b[^.]{0,30}clearance'
+    $path    = '(?i)\b(ability|able)\s+to\s+(obtain|acquire|get|be\s+granted)|\beligib\w*\s+(to\s+obtain|for)\b|' +
+               '\b(must|will|required\s+to)\s+(obtain|acquire)\b|\bwilling(ness)?\s+to\s+(obtain|undergo|apply)|' +
+               '\bsponsor|\bobtainable\b|\bclearable\b|\b(within|in)\s+\d+\s+(days|months)\b'
+    $pref    = '(?i)\b(preferred|a\s+plus|desired|desirable|nice\s+to\s+have|bonus|advantageous)\b'
+    $must    = '(?i)\bmust\b|\brequired\b(?!\s+to\s+obtain)'
+    # Holding one already: "active Secret", "must hold a TS/SCI". It outranks a path
+    # in the same sentence ("active Secret and the ability to obtain TS/SCI") unless
+    # the path is offered as the alternative ("active Secret, or the ability to obtain").
+    $hold    = '(?i)\b(active|current|existing)\b|\b(must|should)\s+(have|hold|possess)\b'
+    $orPath  = '(?i)\bor\b[^.]{0,40}\b(ability|able|eligib)'
+
+    $required = @(); $soft = @()
+    foreach ($s in ($Text -split '(?<=[.!?;])\s+|\r?\n')) {
+        if ([string]::IsNullOrWhiteSpace($s)) { continue }
+        $name = ''
+        if ($s -match $tsSci) { $name = 'TS/SCI' }
+        elseif ($s -match $context -and $s -match $level) {
+            $name = if ($Matches[1] -match '(?i)top') { 'Top Secret' } else { 'Secret' }
+        }
+        if (-not $name -or $s -match $negated) { continue }
+        if ($s -match $pref -and $s -notmatch $must)                     { $soft += "$name preferred, not required" }
+        elseif ($s -match $hold -and -not ($s -match $path -and $s -match $orPath)) { $required += $name }
+        elseif ($s -match $path)                                         { $soft += "$name, with a path to obtain it" }
+        else                                                             { $required += $name }
+    }
+
+    if ($required.Count -gt 0) {
+        $what = (@($required | Select-Object -Unique) -join ', ')
+        $lvl  = if ($Mode -eq 'drop') { 'out' } else { 'check' }
+        $hits += [pscustomobject]@{ Level = $lvl; Why = "requires an active $what clearance" }
+    } elseif ($soft.Count -gt 0) {
+        $hits += [pscustomobject]@{ Level = 'check'; Why = (@($soft | Select-Object -Unique) -join '; ') }
+    }
+    return $hits
 }
 
 function Test-PhysicalDemand {
@@ -1945,6 +2022,16 @@ if (-not $SkipDetail) {
         if ($physChk.Count -gt 0) {
             $p.Reason = ($p.Reason + ' | CHECK physical: ' + (($physChk | ForEach-Object { $_.Why }) -join '; ')).Trim(' |')
         }
+        # Clearance gate, added 2026-11-03. ClearanceScreen in the profile decides
+        # whether a required clearance drops the posting or only flags it.
+        $clr = @(Test-ClearanceRequired $p.Content)
+        $clrOut = @($clr | Where-Object { $_.Level -eq 'out' })
+        if ($clrOut.Count -gt 0) {
+            $p.Screen = 'out'
+            $p.Reason = 'clearance: ' + (($clrOut | ForEach-Object { $_.Why }) -join '; ')
+            continue
+        }
+        foreach ($c in $clr) { $p.Reason = ($p.Reason + ' | CHECK clearance: ' + $c.Why).Trim(' |') }
         # A degree flag NO LONGER DROPS the lead. Get-DegreeFlag reads prose and can be
         # wrong, and the one it killed on 2026-09-09 -- a contracts-and-licensing
         # req, in-region and in the target title family -- is exactly

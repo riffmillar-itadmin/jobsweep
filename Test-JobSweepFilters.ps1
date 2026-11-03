@@ -107,7 +107,7 @@ $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteT
           'Test-LicenceRequired','Get-DegreeFlag','Get-PayRange','Repair-TitleCase','Test-DeveloperRole',
           'Test-PhysicalDemand','Test-IsRequisitionId','Test-LooksLikeLocationList','Resolve-WorkdayBullets',
           'Test-ComplianceTitleOnly','Test-ItContext','Merge-JobSweepProfile',
-          'ConvertFrom-DayforcePosting','Get-DayforcePay')
+          'ConvertFrom-DayforcePosting','Get-DayforcePay','Test-ClearanceRequired')
 $parts = @()
 
 $assign = @($ast.FindAll({ param($n)
@@ -528,6 +528,42 @@ Remove-Item -LiteralPath $badProfile -Force -ErrorAction SilentlyContinue
 Check 'stale key throws'       $threw                                                         $true
 Check 'error names the key'    ($msg -like '*OldCityCheck*')                                  $true
 Check 'error lists valid keys' ($msg -like '*WorksiteCheck*')                                 $true
+
+Write-Host "`n-- CLEARANCE: required, path, preferred, and the words that only look like it (added 2026-11-03) --"
+# Every case passes -Mode, so the result does not depend on the profile under test.
+$clr = { param($t, $m) $h = @(Test-ClearanceRequired $t $m); if ($h.Count) { "$($h[0].Level): $($h[0].Why)" } else { 'none' } }
+Check 'active Secret drops'       (& $clr 'Candidates must have an active Secret clearance.' 'drop')            'out: requires an active Secret clearance'
+Check 'TS/SCI alone drops'        (& $clr 'TS/SCI with polygraph.' 'drop')                                       'out: requires an active TS/SCI clearance'
+Check 'TS-SCI spelling drops'     (& $clr 'Requires TS-SCI.' 'drop')                                             'out: requires an active TS/SCI clearance'
+Check 'Top Secret named'          (& $clr 'A current Top Secret clearance is required.' 'drop')                  'out: requires an active Top Secret clearance'
+Check 'check mode keeps it'       (& $clr 'Candidates must have an active Secret clearance.' 'check')           'check: requires an active Secret clearance'
+Check 'off mode ignores it'       (& $clr 'Candidates must have an active Secret clearance.' 'off')             'none'
+Check 'ability to obtain is path' (& $clr 'Must be able to obtain a Secret clearance.' 'drop')                   'check: Secret, with a path to obtain it'
+Check 'obtain within 90 days'     (& $clr 'You will be required to obtain a Secret clearance within 90 days of hire.' 'drop') 'check: Secret, with a path to obtain it'
+Check 'or ability to obtain'      (& $clr 'Active Secret clearance or the ability to obtain one.' 'drop')       'check: Secret, with a path to obtain it'
+Check 'active plus path drops'    (& $clr 'Active Secret clearance and the ability to obtain TS/SCI.' 'drop')    'out: requires an active TS/SCI clearance'
+Check 'preferred is not required' (& $clr 'An active Secret clearance is preferred.' 'drop')                     'check: Secret preferred, not required'
+Check 'must beats preferred'      (& $clr 'Must hold TS/SCI; CISSP preferred.' 'drop')                          'out: requires an active TS/SCI clearance'
+Check 'trade secrets not a hit'   (& $clr 'You will protect trade secrets and confidential data.' 'drop')        'none'
+Check 'secret sauce not a hit'    (& $clr 'Our secret is great people.' 'drop')                                  'none'
+Check 'no clearance needed'       (& $clr 'No security clearance is required for this role.' 'drop')             'none'
+Check 'public trust not covered'  (& $clr 'Must be able to pass a Public Trust investigation.' 'drop')            'none'
+Check 'blank text'                (& $clr '' 'drop')                                                              'none'
+Check 'line break splits'         (& $clr "Requirements`nActive TS/SCI`nBenefits: 401k" 'drop')                  'out: requires an active TS/SCI clearance'
+# With no -Mode the profile's ClearanceScreen decides, and with none set the default is check.
+# Set-Variable makes a local $Config that the function reads through dynamic scope.
+Check 'default mode is check'     (& { Set-Variable -Name Config -Value @{}; @(Test-ClearanceRequired 'Active Secret clearance.')[0].Level }) 'check'
+Check 'profile drop is read'      (& { Set-Variable -Name Config -Value @{ ClearanceScreen = 'drop' }; @(Test-ClearanceRequired 'Active Secret clearance.')[0].Level }) 'out'
+
+# A misspelt ClearanceScreen value stops the run rather than falling back quietly.
+$badMode = Join-Path ([IO.Path]::GetTempPath()) ("jobsweep-badmode-{0}.psd1" -f ([guid]::NewGuid().ToString('N')))
+Set-Content -LiteralPath $badMode -Value "@{ ClearanceScreen = 'dorp' }" -Encoding utf8
+$threw = $false; $msg = ''
+try   { Merge-JobSweepProfile -Defaults $Config -ProfilePath @($badMode) | Out-Null }
+catch { $threw = $true; $msg = "$_" }
+Remove-Item -LiteralPath $badMode -Force -ErrorAction SilentlyContinue
+Check 'bad ClearanceScreen throws'  $threw                    $true
+Check 'error names the value'       ($msg -like "*'dorp'*")   $true
 
 # ---- MALFORMED LOCATION IS NOT A SCREEN-OUT, added 2026-09-25 ------------
 # iCIMS served a remote engineering req with the literal stub "US-". It is

@@ -100,6 +100,21 @@ RemoteBlock = @(
 # to tighten. Unambiguous "physically demanding" language screens out regardless.
 LiftingLimitLb = 50
 
+# ---- SECURITY CLEARANCE ----
+#
+# A QUESTION ONLY YOU CAN ANSWER: will you take a job that needs an active Secret,
+# Top Secret or TS/SCI clearance you do not already hold? Contractor and agency
+# boards can carry hundreds of these, so decide before your first sweep.
+#
+#   'drop'  -- screen out postings that REQUIRE one
+#   'check' -- keep them, with a CHECK note in the reason (the default)
+#   'off'   -- no clearance screening at all
+#
+# Whatever you choose, a posting that offers a PATH to a clearance ("ability to
+# obtain", "must obtain within 90 days") or only prefers one is kept with a CHECK
+# note, because that is a door rather than a wall. Public Trust is not covered.
+ClearanceScreen = 'check'
+
 # ---- THE EMPLOYER LIST ----
 #
 # Every entry is one applicant-tracking-system tenant. The Token, Tenant, Cid,
