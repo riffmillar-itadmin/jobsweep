@@ -43,6 +43,8 @@ That is what the test suite is for.
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
 | `CLAUDE.md` | ✅ | Rules for Claude Code sessions in this repo. Personal ones go in a gitignored `CLAUDE.local.md`. |
 | `prompts/build-tracking-board.md` | ✅ | A Claude prompt that turns your sweeps and your criteria into a job tracking board. |
+| `docs/example-board.html` | ✅ | An example tracking board for a fictional job seeker in Westmark. Open it in a browser. Every name and figure is invented. |
+| `docs/images/` | ✅ | Screenshots of the example board, used in this README. |
 
 `JobSweep.local.psd1` is the file that must never be published. It is first in
 `.gitignore` for that reason. Before making a repository public, read
@@ -139,6 +141,19 @@ and an Ended track (Passed / Rejected / Closed); pay converted to a yearly
 figure for sorting; sorts, filters and notes; and card edits that stay locked
 until you choose to change them.
 
+![The example board: stage counts, how the board is screened, the filter bar and the first card](docs/images/example-board.png)
+
+Each card shows the posting's arrangement, pay, degree requirement and commute,
+then its score with the reasons behind it, the stage buttons, and your notes:
+
+![One card with its score reasons open: six of seven nice-to-haves met, a quote from the posting, and the stage set to Interviewing](docs/images/example-board-card.png)
+
+These screenshots are of [`docs/example-board.html`](docs/example-board.html),
+a board for J. Seeker, a fictional job seeker in the fictional state of
+Westmark. Every employer, posting, pay figure and note on it is invented.
+Download it and open it in a browser to try the stages, filters and edits.
+Changes you make are kept in that browser only.
+
 A local board is saved as `job-board.html` beside your `Sweeps\` folder. It
 holds your notes and stages, so it is gitignored in case that folder is this
 one.
@@ -203,6 +218,10 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.3.12** (2026-11-03): an example tracking board,
+  `docs/example-board.html`, for a fictional job seeker in Westmark, with two
+  screenshots in the README's tracking-board section. Every name and figure on
+  it is invented. No code changes.
 - **1.3.11** (2026-11-03): pay is read from five more shapes. A check of every
   real sweep found `Pay` blank on 47 postings that stated it: HTML with an
   `&mdash;` between the figures, a minimum and a maximum on separate lines,
