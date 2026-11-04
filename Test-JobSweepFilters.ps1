@@ -730,6 +730,78 @@ if ($writeLogDef.Count -eq 1 -and $mergeCall.Count -eq 1) {
     Check 'merge runs inside a try'        $inTry $true
 }
 
+# ---- SOURCES CARRY THE KEYS THEIR PROVIDER READS, added 2026-11-03 -------
+# The example profile shipped a Workday entry with Dc= and an iCIMS entry with
+# Token=, but the collector reads WdHost and BaseUrl. Anyone copying them got a
+# source that could never answer. This runs against whichever profile is loaded.
+Write-Host "`n-- SOURCES: every entry has the keys its provider reads --"
+$needs = @{
+    Greenhouse = @('Token'); Lever = @('Token'); Workday = @('WdHost', 'Tenant', 'Site'); iCIMS = @('BaseUrl')
+    UltiPro = @('Tenant', 'BoardId'); ADP = @('Cid', 'CcId'); Dayforce = @('Namespace'); Microsoft = @('Queries')
+}
+$badSrc = @()
+foreach ($s in @($Config.Sources)) {
+    if (-not $needs.ContainsKey([string]$s.Provider)) { $badSrc += "$($s.Company): unknown Provider '$($s.Provider)'"; continue }
+    $miss = @($needs[[string]$s.Provider] | Where-Object { -not $s.ContainsKey($_) -or -not $s[$_] })
+    if ($miss.Count -gt 0) { $badSrc += "$($s.Company) ($($s.Provider)): missing $($miss -join ', ')" }
+}
+Check 'every source has its keys'  ($badSrc -join '; ')  ''
+
+# ---- SOURCE SCOUT (Find-JobSweepSources.ps1), added 2026-11-03 ----------
+# Pure helpers only: URL reading, slug guesses, dedupe keys, entry formatting.
+# The network probes are left to a live run.
+Write-Host "`n-- SCOUT: careers URLs, slug guesses, dedupe, entry text --"
+$scoutPath = Join-Path (Split-Path -Parent $SweepScript) 'Find-JobSweepSources.ps1'
+Check 'scout script ships beside the sweep' (Test-Path -LiteralPath $scoutPath) $true
+if (Test-Path -LiteralPath $scoutPath) {
+    $sAst = [System.Management.Automation.Language.Parser]::ParseFile($scoutPath, [ref]$null, [ref]$parseErrors)
+    Check 'scout script parses' (@($parseErrors).Count) 0
+    $scoutWant = @('ConvertFrom-CareersUrl', 'Get-SlugGuess', 'Get-SourceKey', 'Format-SourceEntry', 'Get-NameFromSource', 'ConvertFrom-ScoutLine')
+    $sFns = @($sAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $scoutWant -contains $n.Name }, $true))
+    Check 'scout helpers all found' $sFns.Count $scoutWant.Count
+    . ([scriptblock]::Create((@($sFns | ForEach-Object { $_.Extent.Text }) -join "`n`n")))
+
+    $u = { param($x) $e = ConvertFrom-CareersUrl $x; if ($e) { Format-SourceEntry $e } else { 'none' } }
+    Check 'Greenhouse board'       (& $u 'https://boards.greenhouse.io/ExampleBiotech/jobs/123')           "@{ Provider='Greenhouse'; Token='examplebiotech' }"
+    Check 'Greenhouse job-boards'  (& $u 'https://job-boards.greenhouse.io/example-cloud')                 "@{ Provider='Greenhouse'; Token='example-cloud' }"
+    Check 'Greenhouse embed'       (& $u 'https://boards.greenhouse.io/embed/job_board?for=examplebio')    "@{ Provider='Greenhouse'; Token='examplebio' }"
+    Check 'Greenhouse API URL'     (& $u 'https://boards-api.greenhouse.io/v1/boards/examplebio/jobs')     "@{ Provider='Greenhouse'; Token='examplebio' }"
+    Check 'Lever board'            (& $u 'https://jobs.lever.co/example-fintech/abc-123')                  "@{ Provider='Lever'; Token='example-fintech' }"
+    Check 'Lever EU not offered'   (& $u 'https://jobs.eu.lever.co/example-fintech')                       'none'
+    Check 'Workday tenant host'    (& $u 'https://examplehealth.wd1.myworkdayjobs.com/en-US/External/job/Westmark/Analyst_R1') "@{ Provider='Workday'; WdHost='https://examplehealth.wd1.myworkdayjobs.com'; Tenant='examplehealth'; Site='External' }"
+    Check 'Workday no locale'      (& $u 'https://examplehealth.wd5.myworkdayjobs.com/Careers')            "@{ Provider='Workday'; WdHost='https://examplehealth.wd5.myworkdayjobs.com'; Tenant='examplehealth'; Site='Careers' }"
+    Check 'Workday shared host'    (& $u 'https://wd3.myworkdaysite.com/en-US/recruiting/examplecity/Jobs') "@{ Provider='Workday'; WdHost='https://wd3.myworkdaysite.com'; Tenant='examplecity'; Site='Jobs' }"
+    Check 'iCIMS careers host'     (& $u 'https://careers-examplebank.icims.com/jobs/1234/analyst/job')    "@{ Provider='iCIMS'; BaseUrl='https://careers-examplebank.icims.com' }"
+    Check 'iCIMS www not a board'  (& $u 'https://www.icims.com/products')                                 'none'
+    Check 'UltiPro default host'   (& $u 'https://recruiting.ultipro.com/exa1001examp/JobBoard/0000000A-0000-0000-0000-000000000000/') "@{ Provider='UltiPro'; Tenant='EXA1001EXAMP'; BoardId='0000000a-0000-0000-0000-000000000000' }"
+    Check 'UltiPro numbered host'  (& $u 'https://recruiting2.ultipro.com/EXA1001EXAMP/JobBoard/00000000-0000-0000-0000-000000000000/?q=') "@{ Provider='UltiPro'; Tenant='EXA1001EXAMP'; UkgHost='https://recruiting2.ultipro.com'; BoardId='00000000-0000-0000-0000-000000000000' }"
+    Check 'ADP cid and ccId'       (& $u 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=00000000-0000-0000-0000-000000000000&ccId=19000101_000001&lang=en_US') "@{ Provider='ADP'; Cid='00000000-0000-0000-0000-000000000000'; CcId='19000101_000001' }"
+    Check 'ADP without cid'        (& $u 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html') 'none'
+    Check 'Dayforce with board'    (& $u 'https://jobs.dayforcehcm.com/en-US/examplelogistics/CANDIDATEPORTAL/jobs/123') "@{ Provider='Dayforce'; Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }"
+    Check 'Dayforce no board'      (& $u 'https://jobs.dayforcehcm.com/examplelogistics')                  "@{ Provider='Dayforce'; Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }"
+    Check 'unknown site'           (& $u 'https://www.example.com/careers')                                'none'
+    Check 'blank URL'              (& $u '')                                                               'none'
+
+    Check 'slug: suffix dropped'   ((Get-SlugGuess 'Example Logistics, Inc.') -join ',')  'examplelogistics,example-logistics'
+    Check 'slug: one word'         ((Get-SlugGuess 'Examplecorp') -join ',')              'examplecorp'
+    Check 'slug: ampersand'        ((Get-SlugGuess 'Smith & Example LLC') -join ',')      'smithandexample,smith-and-example'
+    Check 'slug: leading The'      ((Get-SlugGuess 'The Example Company') -join ',')      'example'
+    Check 'slug: blank'            (@(Get-SlugGuess '').Count)                            0
+
+    Check 'key: Workday ignores case'  (Get-SourceKey @{ Provider='Workday'; Tenant='ExampleHealth'; Site='External' }) 'workday|examplehealth|external'
+    Check 'key: Dayforce board default' (Get-SourceKey @{ Provider='Dayforce'; Namespace='examplelogistics' }) 'dayforce|examplelogistics|candidateportal'
+    Check 'key: iCIMS trailing slash'  (Get-SourceKey @{ Provider='iCIMS'; BaseUrl='https://careers-examplebank.icims.com/' }) 'icims|https://careers-examplebank.icims.com'
+    Check 'entry quotes apostrophes'   (Format-SourceEntry @{ Provider='Lever'; Company="Example's Bakery"; Token='examples' }) "@{ Provider='Lever'; Company='Example''s Bakery'; Token='examples' }"
+    Check 'name from iCIMS host'       (Get-NameFromSource @{ Provider='iCIMS'; BaseUrl='https://careers-examplebank.icims.com' }) 'examplebank'
+
+    $l = { param($x) $e = ConvertFrom-ScoutLine $x; if ($e) { '{0}|{1}' -f $e.Company, $e.Url } else { 'none' } }
+    Check 'line: name and URL'     (& $l 'Example Health, https://examplehealth.wd1.myworkdayjobs.com/External') 'Example Health|https://examplehealth.wd1.myworkdayjobs.com/External'
+    Check 'line: URL only'         (& $l '  https://jobs.lever.co/example-fintech ')  '|https://jobs.lever.co/example-fintech'
+    Check 'line: name only'        (& $l 'Example Logistics')                         'Example Logistics|'
+    Check 'line: comment skipped'  (& $l '# not this one')                            'none'
+    Check 'line: blank skipped'    (& $l '   ')                                       'none'
+}
+
 $skipNote = if ($skipped -gt 0) { "   SKIPPED $skipped example-geography checks (not the example profile -- cover your own places in Test-JobSweepProfile.ps1)" } else { '' }
 Write-Host ("`nPASS {0}   FAIL {1}{2}" -f $pass, $fail, $skipNote)
 if ($ResultPath) {

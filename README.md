@@ -38,7 +38,8 @@ That is what the test suite is for.
 | `JobSweep.local.psd1` | ⛔ **gitignored** | **Where you will go and who you are watching.** Geography, commute boundary, remote rules, and the employer list. |
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 314 cases, no network. |
+| `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs and company names into `Sources` entries you can paste. See [Finding new sources](#finding-new-sources). |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 352 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
 | `CLAUDE.md` | ✅ | Rules for Claude Code sessions in this repo. Personal ones go in a gitignored `CLAUDE.local.md`. |
@@ -174,6 +175,32 @@ Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce, and the
 Microsoft careers API. `JobSweep.local.example.psd1` documents where to find the token,
 tenant or board ID for each.
 
+## Finding new sources
+
+A job site that aggregates postings has already filtered them, so an employer
+whose own portal it never scraped stays invisible. `Find-JobSweepSources.ps1`
+works from the other end. Give it careers URLs, company names, or both:
+
+```powershell
+.\Find-JobSweepSources.ps1 -Url 'https://examplehealth.wd1.myworkdayjobs.com/External' -Company 'Example Logistics, Inc.'
+.\Find-JobSweepSources.ps1 -InputFile .\scout-list.txt     # one URL, name, or "Name, URL" per line
+```
+
+For each one it works out the provider and keys from the URL, or guesses the
+slug from a name and probes Greenhouse, Lever and Dayforce. It checks that the
+board answers, counts its postings and the titles that pass your title screen,
+skips what your profile already has, and prints `@{ Provider=... }` lines to
+paste into `Sources`. It never writes to a profile. A name-based hit is a guess,
+so open the board before you add it. Workday, iCIMS, UltiPro and ADP need a URL.
+
+Good places to find URLs:
+
+- **Web search.** `site:myworkdayjobs.com "systems administrator" <your city>`,
+  and the same with `boards.greenhouse.io`, `jobs.lever.co`, `icims.com` or
+  `jobs.dayforcehcm.com`, turns up portals an aggregator missed.
+- **Job alert lists.** Take the company **names** only. Most job sites' terms
+  forbid automated scraping, and a name is all the scout needs.
+
 ## Profiles
 
 Profiles are **replace-by-key, not deep-merged**: a key present in a profile
@@ -209,8 +236,8 @@ version, the profiles it ran against, and its pass, fail and skipped counts.
 ```text
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  314    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  314    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  352    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  352    0       0 PASS
 ```
 
 GitHub Actions runs the same `-BothEditions` check on every push to `main`
@@ -238,6 +265,14 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.6.0** (2026-11-03): `Find-JobSweepSources.ps1`, a source scout. It reads
+  careers URLs for all seven ATS providers, guesses slugs from company names and
+  probes Greenhouse, Lever and Dayforce, counts postings and title matches, skips
+  sources already in the profile, and prints paste-ready `Sources` lines. The
+  example profile's Workday and iCIMS entries now use the keys the collector
+  reads (`WdHost`, `BaseUrl`); the old `Dc` and `Token` keys could never answer.
+  A new check fails any source missing a key its provider needs. 38 new
+  regression cases (352).
 - **1.5.0** (2026-11-03): a clearance screen. `ClearanceScreen` in the local
   profile is `'drop'`, `'check'` (the default) or `'off'`, and the example profile
   asks it as a question. A posting that requires an active Secret, Top Secret or
