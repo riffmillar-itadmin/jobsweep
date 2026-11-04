@@ -117,6 +117,9 @@
     with no matching profile entry is an error, not "No postings retrieved".
     1.5.0 (2026-11-03): clearance screen. ClearanceScreen = drop / check / off in
     the local profile; a path to a clearance, or a preference, is always a CHECK.
+    1.6.0 (2026-11-03): Find-JobSweepSources.ps1, a source scout that turns
+    careers URLs and company names into Sources entries. Example profile Workday
+    and iCIMS entries use the keys the collector reads (WdHost, BaseUrl).
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -149,7 +152,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.5.0'
+$JobSweepVersion = '1.6.0'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo

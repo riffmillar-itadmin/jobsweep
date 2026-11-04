@@ -140,11 +140,12 @@ Sources = @(
     # ---- Lever: api.lever.co/v0/postings/<Token>?mode=json
     @{ Provider='Lever';      Company='Example Fintech';     Token='example-fintech' }
 
-    # ---- Workday: <Tenant>.<Dc>.myworkdayjobs.com/wday/cxs/<Tenant>/<Site>/jobs
-    @{ Provider='Workday';    Company='Example Health';      Tenant='examplehealth'; Dc='wd1'; Site='External' }
+    # ---- Workday: <WdHost>/wday/cxs/<Tenant>/<Site>/jobs. WdHost is the tenant host
+    #      (https://<tenant>.wdN.myworkdayjobs.com) or the shared https://wdN.myworkdaysite.com
+    @{ Provider='Workday';    Company='Example Health';      WdHost='https://examplehealth.wd1.myworkdayjobs.com'; Tenant='examplehealth'; Site='External' }
 
-    # ---- iCIMS: careers-<Token>.icims.com -- read the sitemap, the title is in the slug
-    @{ Provider='iCIMS';      Company='Example Bank';        Token='examplebank' }
+    # ---- iCIMS: BaseUrl is the careers host -- read the sitemap, the title is in the slug
+    @{ Provider='iCIMS';      Company='Example Bank';        BaseUrl='https://careers-examplebank.icims.com' }
 
     # ---- UltiPro: recruiting.ultipro.com, BoardId is the opportunity GUID
     @{ Provider='UltiPro';    Company='Example Legal';       Tenant='EXA1001EXAMP'
