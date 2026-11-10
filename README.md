@@ -39,7 +39,7 @@ That is what the test suite is for.
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs and company names into `Sources` entries you can paste. See [Finding new sources](#finding-new-sources). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 352 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 375 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
 | `CLAUDE.md` | ✅ | Rules for Claude Code sessions in this repo. Personal ones go in a gitignored `CLAUDE.local.md`. |
@@ -236,8 +236,8 @@ version, the profiles it ran against, and its pass, fail and skipped counts.
 ```text
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  352    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  352    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  375    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  375    0       0 PASS
 ```
 
 GitHub Actions runs the same `-BothEditions` check on every push to `main`
@@ -265,6 +265,19 @@ Windows PowerShell 5.1 or PowerShell 7. No modules.
 
 ## Changelog
 
+- **1.6.1** (2026-11-09): collector fixes from a week of sweep logs.
+  - A Workday row with no `title` threw under StrictMode and lost the whole
+    tenant. Workday, Greenhouse and Lever now skip and count such rows, and
+    Microsoft rows are read the same way.
+  - A 429 without Retry-After now waits 15, 30, 60, 60 s instead of 2, 4, 8,
+    16. Retry-After is read as an HTTP-date as well as seconds.
+  - A Microsoft query that fails is logged as `NOT COLLECTED this run`.
+  - `UNDER-COLLECTED` now fires only when rows are missing beyond the ones
+    skipped for having no path or title.
+  - `\bapplications?\s+analyst` added to the title screen. Replayed
+    across 28 screened runs, it keeps 6 more rows.
+  - 23 new regression cases (375). The Workday, Greenhouse and Lever loops are
+    now tested against a fake API.
 - **1.6.0** (2026-11-03): `Find-JobSweepSources.ps1`, a source scout. It reads
   careers URLs for all seven ATS providers, guesses slugs from company names and
   probes Greenhouse, Lever and Dayforce, counts postings and title matches, skips

@@ -120,6 +120,10 @@
     1.6.0 (2026-11-03): Find-JobSweepSources.ps1, a source scout that turns
     careers URLs and company names into Sources entries. Example profile Workday
     and iCIMS entries use the keys the collector reads (WdHost, BaseUrl).
+    1.6.1 (2026-11-09): a row missing a title no longer loses a whole Workday,
+    Greenhouse or Lever source. 429 backs off 15/30/60 s and reads an HTTP-date
+    Retry-After; a lost Microsoft query is named NOT COLLECTED. UNDER-COLLECTED
+    fires only when rows are missing beyond the ones deliberately skipped.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -152,7 +156,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.6.0'
+$JobSweepVersion = '1.6.1'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -450,6 +454,35 @@ try {
     exit 2
 }
 
+function ConvertFrom-RetryAfter {
+    <# Retry-After is either delta-seconds ("120") or an HTTP-date. The old code cast
+       straight to [int], so a date threw, was swallowed, and the wait fell back to the
+       short default. Returns whole seconds, 0 when unreadable or already past. #>
+    param([string]$Value, [datetime]$Now = [datetime]::UtcNow)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return 0 }
+    $v = $Value.Trim()
+    $n = 0
+    if ([int]::TryParse($v, [ref]$n)) { return [math]::Max(0, $n) }
+    $d = [datetimeoffset]::MinValue
+    if ([datetimeoffset]::TryParse($v, [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$d)) {
+        return [int][math]::Max(0, [math]::Ceiling(($d.UtcDateTime - $Now).TotalSeconds))
+    }
+    return 0
+}
+
+function Get-RetryWait {
+    <# Seconds to wait before the next attempt. Retry-After wins when sent (capped at
+       five minutes). A 429 without one backs off far longer than a 5xx: 15, 30, 60, 60.
+       The old 2, 4, 8, 16 gave a rate-limited endpoint about 30 s in all, and the
+       Microsoft search was still throttling at the end of it, so whole queries were
+       lost (5 Nov and 9 Nov 2026). #>
+    param([int]$Status, [int]$RetryAfter, [int]$Attempt)
+    if ($RetryAfter -gt 0) { return [math]::Min(300, $RetryAfter) }
+    if ($Status -eq 429)   { return [int][math]::Min(60, 15 * [math]::Pow(2, $Attempt - 1)) }
+    return [int][math]::Min(120, [math]::Pow(2, $Attempt))
+}
+
 function Get-HttpFailure {
     <# Pulls status code and Retry-After out of a terminating web error on both
        PowerShell 5.1 (HttpWebResponse) and 7+ (HttpResponseMessage). #>
@@ -464,13 +497,13 @@ function Get-HttpFailure {
         # PS 7 / .NET: Headers is a collection of KeyValuePair
         try {
             $ra = $resp.Headers | Where-Object { $_.Key -eq 'Retry-After' } | Select-Object -First 1
-            if ($ra) { $result.RetryAfter = [int]([string]($ra.Value | Select-Object -First 1)) }
+            if ($ra) { $result.RetryAfter = ConvertFrom-RetryAfter ([string]($ra.Value | Select-Object -First 1)) }
         } catch { Write-Verbose "Retry-After not readable as PS 7 headers: $($_.Exception.Message)" }
         # PS 5.1 / WebResponse: Headers is a NameValueCollection
         if ($result.RetryAfter -eq 0) {
             try {
                 $v = $resp.Headers['Retry-After']
-                if ($v) { $result.RetryAfter = [int]$v }
+                if ($v) { $result.RetryAfter = ConvertFrom-RetryAfter ([string]$v) }
             } catch { Write-Verbose "Retry-After not readable as PS 5.1 headers: $($_.Exception.Message)" }
         }
     } catch { Write-Verbose "HTTP failure details unavailable: $($_.Exception.Message)" }
@@ -499,7 +532,7 @@ function Invoke-WithRetry {
                 }
                 throw
             }
-            $wait = if ($f.RetryAfter -gt 0) { $f.RetryAfter } else { [int][math]::Min(120, [math]::Pow(2, $attempt)) }
+            $wait = Get-RetryWait -Status $f.Status -RetryAfter $f.RetryAfter -Attempt $attempt
             $what = if ($f.Status -gt 0) { "HTTP $($f.Status)" } else { 'network fault' }
             Write-Log "$Label : $what on attempt $attempt of $MaxAttempts -- waiting $wait s" 'WARN'
             Start-Sleep -Seconds $wait
@@ -1038,20 +1071,37 @@ function New-Posting {
 #  PROVIDERS -- each returns a list of postings; failures are reported, not fatal
 # ============================================================================
 
+function Get-JsonValue {
+    <# A property of a parsed JSON row, or $null when the row does not have it.
+       Under StrictMode a bare $row.title throws on a row that lacks the field, and
+       inside a provider loop that one throw loses the WHOLE source: externalPath on
+       2026-09-17, title on 2026-11-09. Read optional fields through this. #>
+    param($Object, [string]$Name)
+    if ($null -ne $Object -and $Object.PSObject.Properties.Name -contains $Name) { return $Object.$Name }
+    return $null
+}
+
 function Get-GreenhouseJobs {
     param($Src)
     $uri = "https://boards-api.greenhouse.io/v1/boards/$($Src.Token)/jobs?content=true"
     $r = Invoke-Json $uri
     $out = @()
-    foreach ($j in $r.jobs) {
+    $noTitle = 0
+    foreach ($j in @(Get-JsonValue $r 'jobs')) {
+        if ($null -eq $j) { continue }
+        $title = [string](Get-JsonValue $j 'title')
+        if ([string]::IsNullOrWhiteSpace($title)) { $noTitle++; continue }
         $loc = ''
-        if ($j.PSObject.Properties.Name -contains 'location' -and $j.location -and
-            $j.location.PSObject.Properties.Name -contains 'name') { $loc = $j.location.name }
+        $l = Get-JsonValue $j 'location'
+        if ($l) { $loc = [string](Get-JsonValue $l 'name') }
         $body = ''
-        if ($j.PSObject.Properties.Name -contains 'content') { $body = Convert-HtmlToText $j.content }
-        $out += New-Posting -Source 'Greenhouse' -Company $Src.Company -Title $j.title `
-                    -Location $loc -Url $j.absolute_url -ReqId $j.id -Posted $j.updated_at -Content $body
+        $c = Get-JsonValue $j 'content'
+        if ($c) { $body = Convert-HtmlToText $c }
+        $out += New-Posting -Source 'Greenhouse' -Company $Src.Company -Title $title `
+                    -Location $loc -Url (Get-JsonValue $j 'absolute_url') -ReqId (Get-JsonValue $j 'id') `
+                    -Posted (Get-JsonValue $j 'updated_at') -Content $body
     }
+    if ($noTitle -gt 0) { Write-Log "   Greenhouse $($Src.Company): skipped $noTitle row(s) with no title" 'WARN' }
     return $out
 }
 
@@ -1060,19 +1110,25 @@ function Get-LeverJobs {
     $uri = "https://api.lever.co/v0/postings/$($Src.Token)?mode=json"
     $r = Invoke-Json $uri
     $out = @()
-    foreach ($j in $r) {
+    $noTitle = 0
+    foreach ($j in @($r)) {
+        if ($null -eq $j) { continue }
+        $title = [string](Get-JsonValue $j 'text')
+        if ([string]::IsNullOrWhiteSpace($title)) { $noTitle++; continue }
         $loc = ''
-        if ($j.PSObject.Properties.Name -contains 'categories' -and $j.categories -and
-            $j.categories.PSObject.Properties.Name -contains 'location') { $loc = $j.categories.location }
+        $cat = Get-JsonValue $j 'categories'
+        if ($cat) { $loc = [string](Get-JsonValue $cat 'location') }
         $body = ''
         if ($j.PSObject.Properties.Name -contains 'descriptionPlain' -and $j.descriptionPlain) { $body = $j.descriptionPlain }
         elseif ($j.PSObject.Properties.Name -contains 'description') { $body = Convert-HtmlToText $j.description }
         if ($j.PSObject.Properties.Name -contains 'lists') {
             foreach ($l in $j.lists) { $body += "`n`n" + $l.text + "`n" + (Convert-HtmlToText $l.content) }
         }
-        $out += New-Posting -Source 'Lever' -Company $Src.Company -Title $j.text `
-                    -Location $loc -Url $j.hostedUrl -ReqId $j.id -Posted $j.createdAt -Content $body
+        $out += New-Posting -Source 'Lever' -Company $Src.Company -Title $title `
+                    -Location $loc -Url (Get-JsonValue $j 'hostedUrl') -ReqId (Get-JsonValue $j 'id') `
+                    -Posted (Get-JsonValue $j 'createdAt') -Content $body
     }
+    if ($noTitle -gt 0) { Write-Log "   Lever $($Src.Company): skipped $noTitle row(s) with no title" 'WARN' }
     return $out
 }
 
@@ -1085,6 +1141,7 @@ function Get-WorkdayJobs {
     $total  = 0          # OUTSIDE the loop -- see the paging note below
     $seenPaths  = @{}
     $skippedNoPath = 0
+    $skippedNoTitle = 0
     $stopReason = 'ran out of pages'
 
     # PAGING, rewritten 2026-09-10. The previous loop declared $total INSIDE the do
@@ -1121,8 +1178,14 @@ function Get-WorkdayJobs {
                 $path = [string]$j.externalPath
             }
             if ([string]::IsNullOrWhiteSpace($path)) { $skippedNoPath++; continue }
+            # TITLE GETS THE SAME GUARD, added 2026-11-09. A tenant that had collected
+            # ~155 postings cleanly for a week served a first-page row with no title,
+            # and the bare $j.title in New-Posting threw and lost the whole tenant.
+            $title = [string](Get-JsonValue $j 'title')
+            if ([string]::IsNullOrWhiteSpace($title)) { $skippedNoTitle++; continue }
             $loc = ''
-            if ($j.PSObject.Properties.Name -contains 'locationsText') { $loc = $j.locationsText }
+            $lt = Get-JsonValue $j 'locationsText'
+            if ($null -ne $lt) { $loc = [string]$lt }
             # One large health-system tenant returns an EMPTY locationsText on all 1,454
             # of its reqs, so the
             # location screen never ran for them at all and clinical roles in out-of-scope
@@ -1153,8 +1216,7 @@ function Get-WorkdayJobs {
                 if (-not [string]::IsNullOrWhiteSpace($mapped.ReqId)) { $req = $mapped.ReqId }
                 $loc = $mapped.Location
             }
-            $posted = ''
-            if ($j.PSObject.Properties.Name -contains 'postedOn') { $posted = $j.postedOn }
+            $posted = [string](Get-JsonValue $j 'postedOn')
             if ($seenPaths.ContainsKey($path)) { continue }
             $seenPaths[$path] = $true
             $newThisPage++
@@ -1169,7 +1231,7 @@ function Get-WorkdayJobs {
             } else {
                 $publicUrl = "$($Src.WdHost)/$($Src.Site)" + $path
             }
-            $out += New-Posting -Source 'Workday' -Company $Src.Company -Title $j.title `
+            $out += New-Posting -Source 'Workday' -Company $Src.Company -Title $title `
                         -Location $loc -Url $publicUrl `
                         -ReqId $req -Posted $posted -Content '' |
                     Add-Member -NotePropertyName DetailPath -NotePropertyValue "$base$path" -PassThru
@@ -1190,11 +1252,23 @@ function Get-WorkdayJobs {
     $msg = "   Workday $($Src.Company): collected $($out.Count), stopped because $stopReason"
     if ($total -gt 0) { $msg += "; board claims total=$total" }
     if ($skippedNoPath -gt 0) { $msg += "; skipped $skippedNoPath with no externalPath" }
+    if ($skippedNoTitle -gt 0) { $msg += "; skipped $skippedNoTitle with no title" }
     Write-Log $msg
-    if ($total -gt 0 -and $out.Count -lt $total) {
-        Write-Log ("   UNDER-COLLECTED $($Src.Company): board claims $total, collected $($out.Count)") 'WARN'
+    # Warn only on rows that are really missing. Rows skipped above are already
+    # counted on the line before, and warning on them too made the warning noise
+    # on every large tenant (2026-11-09: three tenants, every gap = skipped rows).
+    $missing = Get-WorkdayShortfall -Claimed $total -Collected $out.Count -Skipped ($skippedNoPath + $skippedNoTitle)
+    if ($missing -gt 0) {
+        Write-Log ("   UNDER-COLLECTED $($Src.Company): board claims $total, collected $($out.Count), skipped $($skippedNoPath + $skippedNoTitle), so $missing missing") 'WARN'
     }
     return $out
+}
+
+function Get-WorkdayShortfall {
+    <# Rows the board claimed that were neither collected nor deliberately skipped. #>
+    param([int]$Claimed, [int]$Collected, [int]$Skipped)
+    if ($Claimed -le 0) { return 0 }
+    return [math]::Max(0, $Claimed - $Collected - $Skipped)
 }
 
 function Add-WorkdayDetail {
@@ -1593,18 +1667,24 @@ function Get-MicrosoftJobs {
                        "&location=$([uri]::EscapeDataString($loc))" +
                        "&start=$startAt"
                 try { $r = Invoke-Json $uri }
-                catch { Write-Host ''; Write-Log "  Microsoft '$q' failed: $($_.Exception.Message)" 'WARN'; break }
+                catch {
+                    Write-Host ''
+                    # A lost query used to be one WARN among dozens of retry lines. Name
+                    # the gap so whoever reads the run can see what is missing.
+                    $what = if ($startAt -eq 0) { 'NOT COLLECTED this run' } else { "only partly collected ($startAt rows)" }
+                    Write-Log "  Microsoft query '$q' ($loc) $what : $($_.Exception.Message)" 'WARN'
+                    break
+                }
 
                 $positions = @()
-                if ($r.PSObject.Properties.Name -contains 'data' -and $r.data -and
-                    $r.data.PSObject.Properties.Name -contains 'positions' -and $r.data.positions) {
-                    $positions = @($r.data.positions)
-                }
+                $data = Get-JsonValue $r 'data'
+                $pos  = Get-JsonValue $data 'positions'
+                if ($pos) { $positions = @($pos) }
                 if ($positions.Count -eq 0) { break }
                 Write-Host '.' -NoNewline -ForegroundColor DarkGray
 
                 # If 'start' is being ignored we will keep receiving the same first row. Stop.
-                $thisFirst = "$($positions[0].id)"
+                $thisFirst = [string](Get-JsonValue $positions[0] 'id')
                 if ($thisFirst -eq $lastFirst) {
                     Write-Host ''
                     Write-Log "  Microsoft '$q': paging is not advancing (start ignored) -- stopping this query" 'WARN'
@@ -1613,8 +1693,10 @@ function Get-MicrosoftJobs {
                 $lastFirst = $thisFirst
 
                 foreach ($j in $positions) {
-                    $id = "$($j.atsJobId)"
-                    if (-not $id) { $id = "$($j.id)" }
+                    $posId = [string](Get-JsonValue $j 'id')
+                    $id = [string](Get-JsonValue $j 'atsJobId')
+                    if (-not $id) { $id = $posId }
+                    if (-not $id) { continue }
                     if ($seen.ContainsKey($id)) { continue }
                     $seen[$id] = $true
 
@@ -1630,16 +1712,17 @@ function Get-MicrosoftJobs {
                         $posted = ([datetimeoffset]::FromUnixTimeSeconds([int64]$j.postedTs)).ToString('yyyy-MM-dd')
                     }
 
-                    $title = "$($j.name)"
+                    $title = [string](Get-JsonValue $j 'name')
+                    if (-not $title) { continue }
                     if ($j.PSObject.Properties.Name -contains 'department' -and $j.department) {
                         $title = "$title [$($j.department)]"
                     }
 
                     $out += New-Posting -Source 'Microsoft' -Company 'Microsoft' -Title $title `
-                                -Location $locText -Url "$base$($j.positionUrl)" -ReqId $id `
+                                -Location $locText -Url ("$base" + [string](Get-JsonValue $j 'positionUrl')) -ReqId $id `
                                 -Posted $posted -Content '' |
                             Add-Member -NotePropertyName DetailPath `
-                                -NotePropertyValue "$base/api/pcsx/position_details?position_id=$($j.id)&domain=microsoft.com&hl=en" -PassThru
+                                -NotePropertyValue "$base/api/pcsx/position_details?position_id=$posId&domain=microsoft.com&hl=en" -PassThru
                 }
                 $startAt += $positions.Count
                 $newHere += $positions.Count
