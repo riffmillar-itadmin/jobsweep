@@ -15,6 +15,10 @@ TitleInclude = @(
     'endpoint','desktop','client system','client engineer','deskside',
     'systems administrator','system administrator','sysadmin',
     'application support','app support','production support',
+    # Added 2026-11-09 (1.6.1). A real lead, "Application Analyst III", was
+    # screened out on 2026-11-09. Replayed across 28 screened runs since Sept:
+    # 6 distinct rows change, all application analysts, 2 of them Epic.
+    '\bapplications?\s+analyst',
     'service desk','help desk','helpdesk','support engineer','support technician',
     'support analyst','support specialist','technical support',
     'software asset','asset manag','software licensing',

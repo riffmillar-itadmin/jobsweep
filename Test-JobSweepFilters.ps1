@@ -107,7 +107,9 @@ $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteT
           'Test-LicenceRequired','Get-DegreeFlag','Get-PayRange','Repair-TitleCase','Test-DeveloperRole',
           'Test-PhysicalDemand','Test-IsRequisitionId','Test-LooksLikeLocationList','Resolve-WorkdayBullets',
           'Test-ComplianceTitleOnly','Test-ItContext','Merge-JobSweepProfile',
-          'ConvertFrom-DayforcePosting','Get-DayforcePay','Test-ClearanceRequired')
+          'ConvertFrom-DayforcePosting','Get-DayforcePay','Test-ClearanceRequired',
+          'Get-JsonValue','Get-WorkdayShortfall','ConvertFrom-RetryAfter','Get-RetryWait',
+          'New-Posting','Convert-HtmlToText','Get-WorkdayJobs','Get-GreenhouseJobs','Get-LeverJobs')
 $parts = @()
 
 $assign = @($ast.FindAll({ param($n)
@@ -729,6 +731,70 @@ if ($writeLogDef.Count -eq 1 -and $mergeCall.Count -eq 1) {
     while ($p) { if ($p -is [System.Management.Automation.Language.TryStatementAst]) { $inTry = $true; break }; $p = $p.Parent }
     Check 'merge runs inside a try'        $inTry $true
 }
+
+# ---- APPLICATION ANALYST, added 2026-11-09 ------------------------------
+Write-Host "`n-- TITLE: application analyst is a target title --"
+Check 'Application Analyst III KEPT'  (Test-TitleMatch 'Application Analyst III').Ok             $true
+Check 'Applications Analyst 2 KEPT'   (Test-TitleMatch 'Applications Analyst 2').Ok              $true
+Check 'Enterprise App Analyst KEPT'   (Test-TitleMatch 'Enterprise Application Analyst III').Ok  $true
+
+# ---- ONE BAD ROW MUST NOT LOSE A SOURCE, added 2026-11-09 ----------------
+# A Workday tenant served a first-page row with no title. The bare $j.title threw
+# under StrictMode and the whole tenant (~155 postings) was lost for the run. The
+# provider functions run here against a fake Invoke-Json, so the real loop is tested.
+Write-Host "`n-- ROW GUARDS: a row missing a field is skipped and counted, the rest kept --"
+$script:testLog = @()
+function Write-Log {
+    # The analyzer lists a Write-Log cmdlet for PowerShell 6.1 on Windows; the
+    # collector carries the same suppression on its own Write-Log.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '',
+        Justification = 'Test stand-in for the collector''s own Write-Log; records lines instead of printing them.')]
+    param([string]$Message, [string]$Level = 'INFO')
+    $script:testLog += "[$Level] $Message"
+}
+$script:Throttle = 0
+Set-Variable -Name WorkdayMaxPostings -Value 2000   # read by Get-WorkdayJobs through dynamic scope
+$script:wdRows = @(
+    [pscustomobject]@{ title = 'Systems Administrator'; externalPath = '/job/Harborview/Systems-Administrator_R1'; locationsText = 'Harborview, WM'; postedOn = 'Posted Today'; bulletFields = @('R1') }
+    [pscustomobject]@{ externalPath = '/job/Harborview/Untitled_R2'; locationsText = 'Harborview, WM' }
+    [pscustomobject]@{ title = 'Endpoint Engineer'; externalPath = '/job/Brookfield/Endpoint-Engineer_R3'; bulletFields = @('R3') }
+)
+# Only -Uri is declared; the other named arguments the providers pass land in $args.
+function Invoke-Json { param([string]$Uri)
+    if ($Uri -like '*/wday/cxs/*') { return [pscustomobject]@{ total = 3; jobPostings = $script:wdRows } }
+    if ($Uri -like '*greenhouse*') { return [pscustomobject]@{ jobs = @([pscustomobject]@{ title = 'IT Analyst'; id = 1; absolute_url = 'https://example.test/1'; updated_at = '2026-11-09' }; [pscustomobject]@{ id = 2 }) } }
+    if ($Uri -like '*lever*')      { return @([pscustomobject]@{ text = 'Help Desk Lead'; id = 'a'; hostedUrl = 'https://example.test/a'; createdAt = 1 }; [pscustomobject]@{ id = 'b' }) }
+    throw "unexpected URI $Uri"
+}
+$wd = @(Get-WorkdayJobs @{ Company = 'Example Health'; WdHost = 'https://examplehealth.wd1.myworkdayjobs.com'; Tenant = 'examplehealth'; Site = 'External' })
+Check 'Workday keeps rows around a titleless one' (($wd | ForEach-Object Title) -join ', ') 'Systems Administrator, Endpoint Engineer'
+Check 'Workday counts the skipped row'       (@($script:testLog | Where-Object { $_ -like '*skipped 1 with no title*' }).Count) 1
+Check 'Workday: skipped row is not a shortfall' (@($script:testLog | Where-Object { $_ -like '*UNDER-COLLECTED*' }).Count) 0
+$gh = @(Get-GreenhouseJobs @{ Company = 'Example Biotech'; Token = 'example-biotech' })
+Check 'Greenhouse skips a titleless row'      (($gh | ForEach-Object Title) -join ', ') 'IT Analyst'
+$lv = @(Get-LeverJobs @{ Company = 'Example Fintech'; Token = 'example-fintech' })
+Check 'Lever skips a titleless row'           (($lv | ForEach-Object Title) -join ', ') 'Help Desk Lead'
+Remove-Item Function:\Invoke-Json, Function:\Write-Log
+
+Check 'Get-JsonValue: missing is null'   ($null -eq (Get-JsonValue ([pscustomobject]@{ a = 1 }) 'title')) $true
+Check 'Get-JsonValue: null object'       ($null -eq (Get-JsonValue $null 'title')) $true
+Check 'Get-JsonValue: present'           (Get-JsonValue ([pscustomobject]@{ title = 'x' }) 'title') 'x'
+
+Write-Host "`n-- UNDER-COLLECTED: warn only when rows are really missing --"
+Check 'gap equal to skipped is not missing' (Get-WorkdayShortfall -Claimed 1878 -Collected 1876 -Skipped 2) 0
+Check 'gap beyond skipped is missing'       (Get-WorkdayShortfall -Claimed 601 -Collected 599 -Skipped 0) 2
+Check 'no claimed total, no shortfall'      (Get-WorkdayShortfall -Claimed 0 -Collected 40 -Skipped 0) 0
+Check 'over-collected is not negative'      (Get-WorkdayShortfall -Claimed 40 -Collected 45 -Skipped 0) 0
+
+Write-Host "`n-- RETRY: 429 backs off longer, Retry-After is read in both forms --"
+Check '429 waits 15 then 30, 60, 60'  ((1..4 | ForEach-Object { Get-RetryWait -Status 429 -RetryAfter 0 -Attempt $_ }) -join ',') '15,30,60,60'
+Check '5xx keeps 2, 4, 8, 16'         ((1..4 | ForEach-Object { Get-RetryWait -Status 503 -RetryAfter 0 -Attempt $_ }) -join ',') '2,4,8,16'
+Check 'Retry-After wins'              (Get-RetryWait -Status 429 -RetryAfter 45 -Attempt 1) 45
+Check 'Retry-After capped at 300'     (Get-RetryWait -Status 429 -RetryAfter 3600 -Attempt 1) 300
+Check 'Retry-After seconds'           (ConvertFrom-RetryAfter '120') 120
+Check 'Retry-After HTTP-date'         (ConvertFrom-RetryAfter 'Mon, 09 Nov 2026 20:01:30 GMT' -Now ([datetime]::new(2026, 11, 9, 20, 0, 0, [DateTimeKind]::Utc))) 90
+Check 'Retry-After past date is 0'    (ConvertFrom-RetryAfter 'Mon, 09 Nov 2026 19:00:00 GMT' -Now ([datetime]::new(2026, 11, 9, 20, 0, 0, [DateTimeKind]::Utc))) 0
+Check 'Retry-After junk is 0'         (ConvertFrom-RetryAfter 'soon') 0
 
 # ---- SOURCES CARRY THE KEYS THEIR PROVIDER READS, added 2026-11-03 -------
 # The example profile shipped a Workday entry with Dc= and an iCIMS entry with
