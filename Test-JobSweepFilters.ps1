@@ -109,7 +109,9 @@ $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteT
           'Test-ComplianceTitleOnly','Test-ItContext','Merge-JobSweepProfile',
           'ConvertFrom-DayforcePosting','Get-DayforcePay','Test-ClearanceRequired',
           'Get-JsonValue','Get-WorkdayShortfall','ConvertFrom-RetryAfter','Get-RetryWait',
-          'New-Posting','Convert-HtmlToText','Get-WorkdayJobs','Get-GreenhouseJobs','Get-LeverJobs')
+          'New-Posting','Convert-HtmlToText','Get-WorkdayJobs','Get-GreenhouseJobs','Get-LeverJobs',
+          'ConvertFrom-RipplingListItem','Merge-RipplingRow','Get-RipplingPay','ConvertTo-IsoText',
+          'Get-RipplingJobs','Add-RipplingDetail')
 $parts = @()
 
 $assign = @($ast.FindAll({ param($n)
@@ -774,7 +776,91 @@ $gh = @(Get-GreenhouseJobs @{ Company = 'Example Biotech'; Token = 'example-biot
 Check 'Greenhouse skips a titleless row'      (($gh | ForEach-Object Title) -join ', ') 'IT Analyst'
 $lv = @(Get-LeverJobs @{ Company = 'Example Fintech'; Token = 'example-fintech' })
 Check 'Lever skips a titleless row'           (($lv | ForEach-Object Title) -join ', ') 'Help Desk Lead'
+Remove-Item Function:\Invoke-Json
+
+# ---- RIPPLING, added 2026-11-10 (1.7.0) ------------------------------------
+# Fictional board shapes. v2 is paged and grouped by posting; v1 repeats a
+# posting once per location under the same uuid. The fake API serves both.
+Write-Host "`n-- RIPPLING: v2 paging, v1 failover, one posting per id, detail and pay --"
+$script:ripCalls = @()
+$script:ripV2Fails = $false
+$script:ripV2 = @(
+    [pscustomobject]@{ totalPages = 2; items = @(
+        [pscustomobject]@{ id = 'r-1'; name = 'Systems Administrator'; url = 'https://ats.rippling.com/example-robotics/jobs/r-1'
+            locations = @([pscustomobject]@{ name = 'Harborview, Westmark'; city = 'Harborview'; stateCode = 'WM'; workplaceType = 'HYBRID' },
+                          [pscustomobject]@{ name = 'Brookfield, Westmark'; city = 'Brookfield'; stateCode = 'WM'; workplaceType = 'ON_SITE' }) }
+        [pscustomobject]@{ id = 'r-2'; name = ''; locations = @() }) }
+    [pscustomobject]@{ totalPages = 2; items = @(
+        [pscustomobject]@{ id = 'r-3'; name = 'IT Support Specialist'
+            locations = @([pscustomobject]@{ name = 'United States'; workplaceType = 'REMOTE' }) }) }
+)
+$script:ripV1 = @(
+    [pscustomobject]@{ uuid = 'r-1'; name = 'Systems Administrator'; url = 'https://ats.rippling.com/example-robotics/jobs/r-1'; workLocation = [pscustomobject]@{ label = 'Harborview, WM' } }
+    [pscustomobject]@{ uuid = 'r-1'; name = 'Systems Administrator'; url = 'https://ats.rippling.com/example-robotics/jobs/r-1'; workLocation = [pscustomobject]@{ label = 'Brookfield, WM' } }
+    [pscustomobject]@{ uuid = 'r-3'; name = 'IT Support Specialist'; workLocation = [pscustomobject]@{ label = 'Remote (Westmark)' } }
+)
+function Invoke-Json { param([string]$Uri)
+    $script:ripCalls += $Uri
+    if ($Uri -like '*/v2/board/*') {
+        if ($script:ripV2Fails) { throw 'HTTP 500 from the fake v2 list' }
+        $pg = [int]([regex]::Match($Uri, 'page=(\d+)').Groups[1].Value)
+        return $script:ripV2[$pg]
+    }
+    if ($Uri -like '*/v1/board/*/jobs/r-1') {
+        return [pscustomobject]@{ createdOn = '2026-11-02T09:15:00.123456-08:00'
+            description = [pscustomobject]@{ role = '<p>Run <b>Intune</b> and Entra ID.</p>'; company = '<p>Example Robotics builds things.</p>' }
+            payRangeDetails = @([pscustomobject]@{ location = 'Harborview'; currency = 'USD'; frequency = 'YEAR'; rangeStart = 80000.0; rangeEnd = 95000.0; isRemote = $false },
+                                [pscustomobject]@{ location = 'Brookfield'; currency = 'USD'; frequency = 'YEAR'; rangeStart = 76000.0; rangeEnd = 90000.0; isRemote = $false }) }
+    }
+    if ($Uri -like '*/v1/board/*/jobs/r-3') { throw 'HTTP 404 from the fake detail' }
+    if ($Uri -like '*/v1/board/*/jobs')     { return $script:ripV1 }
+    throw "unexpected URI $Uri"
+}
+$ripSrc = @{ Company = 'Example Robotics'; Board = 'example-robotics' }
+$rp = @(Get-RipplingJobs $ripSrc)
+Check 'Rippling v2: both pages read'          (@($script:ripCalls | Where-Object { $_ -like '*/v2/*' }).Count) 2
+Check 'Rippling v2: titleless row skipped'    (($rp | ForEach-Object Title) -join ', ') 'Systems Administrator, IT Support Specialist'
+Check 'Rippling v2: skipped row counted'      (@($script:testLog | Where-Object { $_ -like '*Rippling Example Robotics: skipped 1 row*' }).Count) 1
+Check 'Rippling v2: locations joined'         $rp[0].Location 'Harborview, WM | Brookfield, WM'
+Check 'Rippling v2: remote location'          $rp[1].Location 'Remote | United States'
+Check 'Rippling v2: remote passes screen'     (Test-LocationMatch $rp[1].Location).Ok $true
+Check 'Rippling: url built when missing'      $rp[1].Url 'https://ats.rippling.com/example-robotics/jobs/r-3'
+Check 'Rippling: key by id'                   $rp[0].Key 'Rippling|r-1'
+Check 'Rippling: detail path'                 $rp[0].DetailPath 'https://api.rippling.com/platform/api/ats/v1/board/example-robotics/jobs/r-1'
+Check 'Rippling: no text before detail'       $rp[0].Content ''
+
+Add-RipplingDetail $rp[0]
+Check 'Rippling detail: role text first'      ($rp[0].Content -like 'Run Intune and Entra ID.*Example Robotics builds things.') $true
+Check 'Rippling detail: pay across tiers'     $rp[0].Pay '$76,000 - $95,000'
+Check 'Rippling detail: posted date'          ($rp[0].Posted -like '2026-11-0*') $true
+Add-RipplingDetail $rp[1]
+Check 'Rippling detail: failure is a warning' (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like '*detail fetch failed for Example Robotics / IT Support Specialist*' }).Count) 1
+Check 'Rippling detail: failure keeps row'    $rp[1].Title 'IT Support Specialist'
+
+$script:ripV2Fails = $true; $script:ripCalls = @()
+$rv1 = @(Get-RipplingJobs $ripSrc)
+Check 'Rippling failover: v1 list used'       (@($script:ripCalls | Where-Object { $_ -like '*/v1/board/example-robotics/jobs' }).Count) 1
+Check 'Rippling failover: logged as WARN'     (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like '*v2 list failed*trying the v1 list' }).Count) 1
+Check 'Rippling v1: one posting per uuid'     $rv1.Count 2
+Check 'Rippling v1: locations joined'         $rv1[0].Location 'Harborview, WM | Brookfield, WM'
 Remove-Item Function:\Invoke-Json, Function:\Write-Log
+
+Check 'Rippling: no second Remote'      (@(Merge-RipplingRow @(@{ Id = 'x'; Title = 'A'; Url = ''; Locations = @('Remote (United States)'); Remote = $true }))[0].Location) 'Remote (United States)'
+Check 'Rippling item: v1 uuid read'      (ConvertFrom-RipplingListItem ([pscustomobject]@{ uuid = 'u'; name = 'Analyst' })).Id 'u'
+Check 'Rippling item: no id is null'     ($null -eq (ConvertFrom-RipplingListItem ([pscustomobject]@{ name = 'Analyst' }))) $true
+Check 'Rippling item: city without state' (ConvertFrom-RipplingListItem ([pscustomobject]@{ id = 'x'; name = 'A'; locations = @([pscustomobject]@{ name = 'Westmark'; city = 'Harborview' }) })).Locations[0] 'Westmark'
+$rr = { param($a, $b, $f, $c) [pscustomobject]@{ rangeStart = $a; rangeEnd = $b; frequency = $f; currency = $c } }
+Check 'Rippling pay: one range'          (Get-RipplingPay @(& $rr 70000.0 90000.0 'YEAR' 'USD')) '$70,000 - $90,000'
+Check 'Rippling pay: hourly'             (Get-RipplingPay @(& $rr 24.5 31.0 'HOUR' 'USD')) '$24.50 - $31.00 per hour'
+Check 'Rippling pay: other currency'     (Get-RipplingPay @(& $rr 60000.0 70000.0 'YEAR' 'CAD')) 'CAD 60,000 - CAD 70,000'
+Check 'Rippling pay: mixed units, first kind' (Get-RipplingPay @((& $rr 80000.0 90000.0 'YEAR' 'USD'), (& $rr 30.0 40.0 'HOUR' 'USD'))) '$80,000 - $90,000'
+Check 'Rippling pay: end below start'    (Get-RipplingPay @(& $rr 90000.0 80000.0 'YEAR' 'USD')) ''
+Check 'Rippling pay: zero'               (Get-RipplingPay @(& $rr 0.0 0.0 'YEAR' 'USD')) ''
+Check 'Rippling pay: missing end'        (Get-RipplingPay @([pscustomobject]@{ rangeStart = 50000.0; currency = 'USD'; frequency = 'YEAR' })) ''
+Check 'Rippling pay: empty list'         (Get-RipplingPay @()) ''
+Check 'Rippling pay: null'               (Get-RipplingPay $null) ''
+Check 'ISO text from a DateTime'         (ConvertTo-IsoText ([datetime]::new(2026, 11, 2, 17, 15, 0, [DateTimeKind]::Utc))) '2026-11-02T17:15:00Z'
+Check 'ISO text from a string'           (ConvertTo-IsoText '2026-11-02T09:15:00-08:00') '2026-11-02T09:15:00-08:00'
 
 Check 'Get-JsonValue: missing is null'   ($null -eq (Get-JsonValue ([pscustomobject]@{ a = 1 }) 'title')) $true
 Check 'Get-JsonValue: null object'       ($null -eq (Get-JsonValue $null 'title')) $true
@@ -804,6 +890,7 @@ Write-Host "`n-- SOURCES: every entry has the keys its provider reads --"
 $needs = @{
     Greenhouse = @('Token'); Lever = @('Token'); Workday = @('WdHost', 'Tenant', 'Site'); iCIMS = @('BaseUrl')
     UltiPro = @('Tenant', 'BoardId'); ADP = @('Cid', 'CcId'); Dayforce = @('Namespace'); Microsoft = @('Queries')
+    Rippling = @('Board')
 }
 $badSrc = @()
 foreach ($s in @($Config.Sources)) {
@@ -845,6 +932,10 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'ADP without cid'        (& $u 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html') 'none'
     Check 'Dayforce with board'    (& $u 'https://jobs.dayforcehcm.com/en-US/examplelogistics/CANDIDATEPORTAL/jobs/123') "@{ Provider='Dayforce'; Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }"
     Check 'Dayforce no board'      (& $u 'https://jobs.dayforcehcm.com/examplelogistics')                  "@{ Provider='Dayforce'; Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }"
+    Check 'Rippling board keeps case' (& $u 'https://ats.rippling.com/Example-Robotics/jobs/00000000-0000-0000-0000-000000000001')   "@{ Provider='Rippling'; Board='Example-Robotics' }"
+    Check 'Rippling with locale'   (& $u 'https://ats.rippling.com/en-GB/example-robotics-careers/jobs')   "@{ Provider='Rippling'; Board='example-robotics-careers' }"
+    Check 'Rippling API URL'       (& $u 'https://api.rippling.com/platform/api/ats/v1/board/example-robotics/jobs') "@{ Provider='Rippling'; Board='example-robotics' }"
+    Check 'Rippling bare host'     (& $u 'https://ats.rippling.com/')                                     'none'
     Check 'unknown site'           (& $u 'https://www.example.com/careers')                                'none'
     Check 'blank URL'              (& $u '')                                                               'none'
 
@@ -858,6 +949,8 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'key: Dayforce board default' (Get-SourceKey @{ Provider='Dayforce'; Namespace='examplelogistics' }) 'dayforce|examplelogistics|candidateportal'
     Check 'key: iCIMS trailing slash'  (Get-SourceKey @{ Provider='iCIMS'; BaseUrl='https://careers-examplebank.icims.com/' }) 'icims|https://careers-examplebank.icims.com'
     Check 'entry quotes apostrophes'   (Format-SourceEntry @{ Provider='Lever'; Company="Example's Bakery"; Token='examples' }) "@{ Provider='Lever'; Company='Example''s Bakery'; Token='examples' }"
+    Check 'key: Rippling board'        (Get-SourceKey @{ Provider='Rippling'; Board='Example-Robotics' }) 'rippling|example-robotics'
+    Check 'name from Rippling board'   (Get-NameFromSource @{ Provider='Rippling'; Board='example-robotics' }) 'example-robotics'
     Check 'name from iCIMS host'       (Get-NameFromSource @{ Provider='iCIMS'; BaseUrl='https://careers-examplebank.icims.com' }) 'examplebank'
 
     $l = { param($x) $e = ConvertFrom-ScoutLine $x; if ($e) { '{0}|{1}' -f $e.Company, $e.Url } else { 'none' } }

@@ -39,7 +39,7 @@ That is what the test suite is for.
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs and company names into `Sources` entries you can paste. See [Finding new sources](#finding-new-sources). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 375 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 415 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
 | `CLAUDE.md` | ✅ | Rules for Claude Code sessions in this repo. Personal ones go in a gitignored `CLAUDE.local.md`. |
@@ -171,8 +171,8 @@ one.
 
 ## Supported providers
 
-Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce, and the
-Microsoft careers API. `JobSweep.local.example.psd1` documents where to find the token,
+Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce, Rippling,
+and the Microsoft careers API. `JobSweep.local.example.psd1` documents where to find the token,
 tenant or board ID for each.
 
 ## Finding new sources
@@ -187,7 +187,7 @@ works from the other end. Give it careers URLs, company names, or both:
 ```
 
 For each one it works out the provider and keys from the URL, or guesses the
-slug from a name and probes Greenhouse, Lever and Dayforce. It checks that the
+slug from a name and probes Greenhouse, Lever, Dayforce and Rippling. It checks that the
 board answers, counts its postings and the titles that pass your title screen,
 skips what your profile already has, and prints `@{ Provider=... }` lines to
 paste into `Sources`. It never writes to a profile. A name-based hit is a guess,
@@ -196,8 +196,9 @@ so open the board before you add it. Workday, iCIMS, UltiPro and ADP need a URL.
 Good places to find URLs:
 
 - **Web search.** `site:myworkdayjobs.com "systems administrator" <your city>`,
-  and the same with `boards.greenhouse.io`, `jobs.lever.co`, `icims.com` or
-  `jobs.dayforcehcm.com`, turns up portals an aggregator missed.
+  and the same with `boards.greenhouse.io`, `jobs.lever.co`, `icims.com`,
+  `jobs.dayforcehcm.com` or `ats.rippling.com`, turns up portals an aggregator
+  missed.
 - **Job alert lists.** Take the company **names** only. Most job sites' terms
   forbid automated scraping, and a name is all the scout needs.
 
@@ -236,8 +237,8 @@ version, the profiles it ran against, and its pass, fail and skipped counts.
 ```text
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  375    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  375    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  415    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  415    0       0 PASS
 ```
 
 GitHub Actions runs the same `-BothEditions` check on every push to `main`
@@ -274,6 +275,20 @@ decide what ships.
 
 ## Changelog
 
+- **1.7.0** (2026-11-10): a Rippling provider (`ats.rippling.com`).
+  - The paged v2 list is read first, one row per posting with each location.
+    If it fails, the older v1 list is the failover; it repeats a posting once
+    per location, so rows are merged by id and the locations joined.
+  - A remote location puts `Remote` in front of the location, as Dayforce does,
+    unless a location already starts with it.
+  - The lists carry no description, pay or date. Postings that survive the
+    title and location screen get them from their own record. Pay stated in
+    the text wins; otherwise `payRangeDetails` gives it, with pay by location
+    tier shown as the lowest start to the highest end.
+  - The scout reads `ats.rippling.com/<Board>` URLs, keeping the slug's case,
+    and probes Rippling by name as `<slug>` and `<slug>-careers`.
+  - 40 new regression cases (415), with the Rippling loop tested against a
+    fake API for paging, failover, merging and a failed detail call.
 - **1.6.2** (2026-11-10): README: a How this is built section on how
   JobSweep is written, reviewed, tested and released. No code changes.
 - **1.6.1** (2026-11-09): collector fixes from a week of sweep logs.

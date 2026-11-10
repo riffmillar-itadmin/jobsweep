@@ -128,6 +128,7 @@ ClearanceScreen = 'check'
 #   UltiPro     <Tenant>.ultipro.com, BoardId is the opportunity GUID
 #   ADP         Cid and CcId are query parameters on the careers URL
 #   Dayforce    jobs.dayforcehcm.com/en-US/<Namespace>/<Board>/jobs -- both in the URL
+#   Rippling    ats.rippling.com/<Board>/jobs           -- Board is in the URL, case and all
 #
 # Start with five or six employers you would actually work for, confirm the
 # sweep returns their postings, then grow the list.
@@ -158,6 +159,10 @@ Sources = @(
     # ---- Dayforce: jobs.dayforcehcm.com/api/geo/<Namespace>/jobposting/search
     # Board defaults to CANDIDATEPORTAL, the name most employers use.
     @{ Provider='Dayforce';   Company='Example Logistics';   Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }
+
+    # ---- Rippling: api.rippling.com/platform/api/ats/v2/board/<Board>/jobs
+    # The slug is case-sensitive; copy it from the careers URL as it appears.
+    @{ Provider='Rippling';   Company='Example Robotics';    Board='example-robotics-careers' }
 )
 
 }

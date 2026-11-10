@@ -9,9 +9,10 @@
     other end. Give it company names, careers URLs, or both, and for each one it:
 
       1. works out the provider and its keys from a careers URL
-         (Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce)
+         (Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce,
+         Rippling)
       2. or, given only a company name, guesses the slug and probes the providers
-         that can be probed by name (Greenhouse, Lever, Dayforce)
+         that can be probed by name (Greenhouse, Lever, Dayforce, Rippling)
       3. checks that the board answers, counts its postings, and counts the titles
          that pass your profile's title screen
       4. skips anything already in your profile's Sources
@@ -141,6 +142,14 @@ function ConvertFrom-CareersUrl {
         if ($m.Groups[2].Success -and $m.Groups[2].Value -and $m.Groups[2].Value -notin @('jobs')) { $board = $m.Groups[2].Value.ToUpper() }
         return @{ Provider = 'Dayforce'; Namespace = $m.Groups[1].Value.ToLower(); Board = $board }
     }
+
+    # Rippling board slugs are case-sensitive, so the case in the URL is kept.
+    $m = [regex]::Match($u, '(?i)^https?://ats\.rippling\.com/(?:[a-z]{2}-[a-z]{2}/)?([A-Za-z0-9_-]+)')
+    if ($m.Success -and $m.Groups[1].Value -notin @('api', 'jobs')) {
+        return @{ Provider = 'Rippling'; Board = $m.Groups[1].Value }
+    }
+    $m = [regex]::Match($u, '(?i)^https?://api\.rippling\.com/platform/api/ats/v[0-9]+/board/([A-Za-z0-9_-]+)')
+    if ($m.Success) { return @{ Provider = 'Rippling'; Board = $m.Groups[1].Value } }
     return $null
 }
 
@@ -176,6 +185,7 @@ function Get-SourceKey {
             $b = & $g 'Board'; if (-not $b) { $b = 'candidateportal' }
             return 'dayforce|' + (& $g 'Namespace') + '|' + $b
         }
+        'Rippling'   { return 'rippling|' + (& $g 'Board') }
         default      { return ([string]$Src.Provider).ToLower() + '|' + (& $g 'Company') }
     }
 }
@@ -192,7 +202,7 @@ function Format-SourceEntry {
 function Get-NameFromSource {
     <# A placeholder company name when a URL came without one: the slug or tenant. #>
     param([hashtable]$Src)
-    foreach ($k in 'Token', 'Tenant', 'Namespace') { if ($Src.ContainsKey($k) -and $Src[$k]) { return [string]$Src[$k] } }
+    foreach ($k in 'Token', 'Tenant', 'Namespace', 'Board') { if ($Src.ContainsKey($k) -and $Src[$k]) { return [string]$Src[$k] } }
     if ($Src.ContainsKey('BaseUrl') -and $Src.BaseUrl) { return (([uri]$Src.BaseUrl).Host -replace '^careers-', '' -replace '\.icims\.com$', '') }
     return [string]$Src.Provider
 }
@@ -263,6 +273,14 @@ function Invoke-SourceProbe {
                     $r.Titles = @($posts | Where-Object { & $prop $_ 'jobTitle' } | ForEach-Object { [string]$_.jobTitle })
                     $r.Note = 'titles from the first page only'
                 } else { $r.Note = 'no postings on that namespace and board' }
+            }
+            'Rippling' {
+                $j = Invoke-ScoutRequest "https://api.rippling.com/platform/api/ats/v2/board/$($Src.Board)/jobs?groupJobsByLocation=true&page=0&pageSize=100"
+                $items = @(); if ((& $prop $j 'items') -and $j.items) { $items = @($j.items) }
+                $r.Answered = $true
+                $r.Postings = if ((& $prop $j 'totalItems') -and $j.totalItems) { [int]$j.totalItems } else { $items.Count }
+                $r.Titles = @($items | Where-Object { & $prop $_ 'name' } | ForEach-Object { [string]$_.name })
+                if ($r.Postings -gt $items.Count) { $r.Note = 'titles from the first page only' }
             }
             default { $r.Note = "not probed: run Invoke-JobSweep.ps1 -Source $($Src.Provider) -DryRun with the entry added" }
         }
@@ -337,6 +355,8 @@ $results = foreach ($w in $work) {
             $tries += @{ Src = @{ Provider = 'Greenhouse'; Company = $w.Company; Token = $slug }; Guess = $true }
             $tries += @{ Src = @{ Provider = 'Lever';      Company = $w.Company; Token = $slug }; Guess = $true }
             $tries += @{ Src = @{ Provider = 'Dayforce';   Company = $w.Company; Namespace = $slug; Board = 'CANDIDATEPORTAL' }; Guess = $true }
+            $tries += @{ Src = @{ Provider = 'Rippling';   Company = $w.Company; Board = $slug }; Guess = $true }
+            $tries += @{ Src = @{ Provider = 'Rippling';   Company = $w.Company; Board = "$slug-careers" }; Guess = $true }
         }
     }
 
@@ -370,7 +390,7 @@ $results = foreach ($w in $work) {
         }
     }
     if (-not $w.Url -and $found -eq 0) {
-        $why = if ($NoProbe) { 'not probed (-NoProbe)' } else { 'no Greenhouse, Lever or Dayforce board under the guessed names; find its careers URL' }
+        $why = if ($NoProbe) { 'not probed (-NoProbe)' } else { 'no Greenhouse, Lever, Dayforce or Rippling board under the guessed names; find its careers URL' }
         [pscustomobject][ordered]@{ Input = $w.Company; Company = $w.Company; Provider = '-'; Status = 'not found'; Postings = '-'; TitleMatches = '-'; Note = $why; Entry = '' }
     }
 }

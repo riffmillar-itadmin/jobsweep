@@ -30,7 +30,7 @@
 
 .PARAMETER Source
     Run only one provider: Greenhouse, Lever, Workday, Microsoft, ADP, iCIMS,
-    UltiPro or Dayforce. Omit for all.
+    UltiPro, Dayforce or Rippling. Omit for all.
 
 .PARAMETER DryRun
     Fetch, screen and report, but do NOT update the seen-state file. Safe to re-run.
@@ -125,6 +125,9 @@
     Retry-After; a lost Microsoft query is named NOT COLLECTED. UNDER-COLLECTED
     fires only when rows are missing beyond the ones deliberately skipped.
     1.6.2 (2026-11-10): README: How this is built. No code changes.
+    1.7.0 (2026-11-10): Rippling provider (ats.rippling.com) -- paged v2 list with
+    the v1 list as failover, one posting per id, description, posted date and pay
+    from each survivor's own record. The scout reads Rippling URLs and probes them.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -135,7 +138,7 @@ param(
     # Resolved after the profiles load: this parameter, else OutputRoot in a
     # profile, else the folder this script lives in.
     [string] $OutputRoot,
-    [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro','Dayforce')]
+    [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro','Dayforce','Rippling')]
     [string] $Source,
     [switch] $DryRun,
     [switch] $SkipDetail,
@@ -157,7 +160,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.6.2'
+$JobSweepVersion = '1.7.0'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -1937,6 +1940,169 @@ function Add-DayforceDetail {
     Start-Sleep -Milliseconds $script:Throttle
 }
 
+# ---- Rippling ---------------------------------------------------------------
+# ats.rippling.com/<Board>/jobs, added 1.7.0. Keyless JSON. The board slug is
+# case-sensitive. The v2 list is paged and gives one row per posting, with each
+# location and its workplaceType; the older v1 list is unpaged and repeats a
+# posting once per location under the same uuid. v2 is tried first and v1 is the
+# failover. Neither list carries the description, pay or a date: those come from
+# the per-posting record at /v1/board/<Board>/jobs/<id>, fetched for the postings
+# that survive the title and location screen.
+
+function ConvertFrom-RipplingListItem {
+    <# One list row, v2 or v1 shape, reduced to @{ Id; Title; Url; Locations; Remote }.
+       Pure, so the suite can test it without a network. Returns $null for a row
+       with no id or no title. #>
+    param($Item)
+    $id = [string](Get-JsonValue $Item 'id')
+    if (-not $id) { $id = [string](Get-JsonValue $Item 'uuid') }
+    $title = [string](Get-JsonValue $Item 'name')
+    if (-not $id -or [string]::IsNullOrWhiteSpace($title)) { return $null }
+    $locs = @()
+    $remote = $false
+    foreach ($L in @(Get-JsonValue $Item 'locations')) {           # v2
+        if ($null -eq $L) { continue }
+        $city = [string](Get-JsonValue $L 'city'); $st = [string](Get-JsonValue $L 'stateCode')
+        $one = if ($city -and $st) { "$city, $st" } else { [string](Get-JsonValue $L 'name') }
+        if ([string](Get-JsonValue $L 'workplaceType') -eq 'REMOTE') { $remote = $true }
+        if ($one -and ($locs -notcontains $one)) { $locs += $one }
+    }
+    $wl = Get-JsonValue $Item 'workLocation'                         # v1
+    if ($wl) {
+        $one = [string](Get-JsonValue $wl 'label')
+        if ($one -and ($locs -notcontains $one)) { $locs += $one }
+    }
+    return @{ Id = $id; Title = $title.Trim(); Url = [string](Get-JsonValue $Item 'url'); Locations = $locs; Remote = $remote }
+}
+
+function Merge-RipplingRow {
+    <# Rows from either list, one entry per id, locations joined in first-seen
+       order. A remote location puts the word Remote in front, as Dayforce does,
+       so Test-IsRemote and the remote screen read it like any other provider's. #>
+    param($Rows)
+    $byId = [ordered]@{}
+    foreach ($r in @($Rows)) {
+        if ($null -eq $r) { continue }
+        if (-not $byId.Contains($r.Id)) { $byId[$r.Id] = @{ Id = $r.Id; Title = $r.Title; Url = $r.Url; Locations = @(); Remote = $false } }
+        $m = $byId[$r.Id]
+        foreach ($l in $r.Locations) { if ($m.Locations -notcontains $l) { $m.Locations += $l } }
+        if ($r.Remote) { $m.Remote = $true }
+    }
+    $out = @()
+    foreach ($m in $byId.Values) {
+        $locs = $m.Locations
+        # Skipped when a location already says remote, e.g. "Remote (United States)".
+        if ($m.Remote -and -not @($locs | Where-Object { $_ -match '^(?i)remote\b' })) { $locs = @('Remote') + $locs }
+        $out += @{ Id = $m.Id; Title = $m.Title; Url = $m.Url; Location = ($locs -join ' | ') }
+    }
+    return @($out)
+}
+
+function Get-RipplingPay {
+    <# Pay from a detail record's payRangeDetails[]. One entry gives its own range;
+       several (pay by location tier) give the lowest start to the highest end in
+       one currency and frequency. Returns '' when no usable range is there. #>
+    param($Ranges)
+    $lo = $null; $hi = $null; $cur = ''; $freq = ''
+    foreach ($r in @($Ranges)) {
+        if ($null -eq $r) { continue }
+        $a = Get-JsonValue $r 'rangeStart'; $b = Get-JsonValue $r 'rangeEnd'
+        if ($null -eq $a -or $null -eq $b) { continue }
+        $a = [double]$a; $b = [double]$b
+        if ($a -le 0 -or $b -lt $a) { continue }
+        $c = [string](Get-JsonValue $r 'currency'); $f = [string](Get-JsonValue $r 'frequency')
+        if ($null -eq $lo) { $cur = $c; $freq = $f }
+        elseif ($c -ne $cur -or $f -ne $freq) { continue }   # mixed units: keep the first kind
+        if ($null -eq $lo -or $a -lt $lo) { $lo = $a }
+        if ($null -eq $hi -or $b -gt $hi) { $hi = $b }
+    }
+    if ($null -eq $lo) { return '' }
+    $sym = if (-not $cur -or $cur -eq 'USD') { '$' } else { "$cur " }
+    if ($freq -match '(?i)^hour') { return ('{0}{1:N2} - {0}{2:N2} per hour' -f $sym, $lo, $hi) }
+    $pay = '{0}{1:N0} - {0}{2:N0}' -f $sym, $lo, $hi
+    if ($freq -and $freq -notmatch '(?i)^year') { $pay += " per $($freq.ToLower())" }
+    return $pay
+}
+
+function ConvertTo-IsoText {
+    <# PowerShell 7 turns an ISO timestamp into a DateTime while parsing JSON and
+       5.1 leaves it a string. Either way, back to the same ISO text. #>
+    param($Value)
+    if ($null -eq $Value) { return '' }
+    if ($Value -is [datetime]) {
+        return $Value.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+    }
+    return [string]$Value
+}
+
+function Get-RipplingJobs {
+    param($Src)
+    $board = [string]$Src.Board
+    $api   = "https://api.rippling.com/platform/api/ats"
+    $rows  = @()
+    $how   = ''
+    try {
+        $page = 0; $size = 100; $pages = 1
+        while ($page -lt $pages -and $page -lt 50) {
+            $r = Invoke-Json -Uri "$api/v2/board/$board/jobs?groupJobsByLocation=true&page=$page&pageSize=$size" `
+                             -Label "$($Src.Company) Rippling list"
+            $items = @(Get-JsonValue $r 'items')
+            $tp = Get-JsonValue $r 'totalPages'
+            if ($null -ne $tp) { $pages = [int]$tp }
+            if ($items.Count -eq 0) { break }
+            foreach ($i in $items) { $rows += ,(ConvertFrom-RipplingListItem $i) }
+            $page++
+            # No totalPages in the answer: keep paging while pages come back full.
+            if ($null -eq $tp -and $items.Count -ge $size) { $pages = $page + 1 }
+            if ($page -lt $pages) { Start-Sleep -Milliseconds $script:Throttle }
+        }
+        $how = "v2 list, $page page(s)"
+    } catch {
+        # Failover: the older unpaged list still answers on boards where v2 does not.
+        Write-Log "   Rippling $($Src.Company): v2 list failed ($($_.Exception.Message)); trying the v1 list" 'WARN'
+        $rows = @()
+        $r = Invoke-Json -Uri "$api/v1/board/$board/jobs" -Label "$($Src.Company) Rippling v1 list"
+        foreach ($i in @($r)) { $rows += ,(ConvertFrom-RipplingListItem $i) }
+        $how = 'v1 list (failover)'
+    }
+    $raw = @($rows).Count
+    $dropped = @($rows | Where-Object { $null -eq $_ }).Count
+    $out = @()
+    foreach ($m in @(Merge-RipplingRow $rows)) {
+        $url = if ($m.Url) { $m.Url } else { "https://ats.rippling.com/$board/jobs/$($m.Id)" }
+        $out += (New-Posting -Source 'Rippling' -Company $Src.Company -Title $m.Title `
+                    -Location $m.Location -Url $url -ReqId $m.Id -Posted '' -Content '' |
+                 Add-Member -NotePropertyName DetailPath -NotePropertyValue "$api/v1/board/$board/jobs/$($m.Id)" -PassThru)
+    }
+    if ($dropped -gt 0) { Write-Log "   Rippling $($Src.Company): skipped $dropped row(s) with no id or title" 'WARN' }
+    Write-Log ("   Rippling {0}: {1} postings from {2} rows -- {3}" -f $Src.Company, $out.Count, $raw, $how)
+    return $out
+}
+
+function Add-RipplingDetail {
+    <# Description (company and role parts), posted date and pay from the posting's
+       own record. Pay from the text wins; payRangeDetails fills it when the text
+       gives none. #>
+    param($Posting)
+    try {
+        $d = Invoke-Json -Uri $Posting.DetailPath -Label "$($Posting.Company) Rippling detail"
+        $html = ''
+        $desc = Get-JsonValue $d 'description'
+        if ($desc -is [string]) { $html = $desc }
+        elseif ($desc) { $html = ([string](Get-JsonValue $desc 'role')) + "`n" + ([string](Get-JsonValue $desc 'company')) }
+        $Posting.Content      = Convert-HtmlToText $html
+        $Posting.Pay          = Get-PayRange $Posting.Content
+        if (-not $Posting.Pay) { $Posting.Pay = Get-RipplingPay (Get-JsonValue $d 'payRangeDetails') }
+        $Posting.Degree       = Get-DegreeFlag $Posting.Content
+        $Posting.NeedsLicence = [bool](Test-LicenceRequired $Posting.Content)
+        $posted = ConvertTo-IsoText (Get-JsonValue $d 'createdOn')
+        if ($posted) { $Posting.Posted = $posted }
+    } catch {
+        Write-Log "  detail fetch failed for $($Posting.Company) / $($Posting.Title): $($_.Exception.Message)" 'WARN'
+    }
+    Start-Sleep -Milliseconds $script:Throttle
+}
+
 # ============================================================================
 #  MAIN
 # ============================================================================
@@ -2039,6 +2205,7 @@ foreach ($src in $sources) {
             'iCIMS'      { $got = @(Get-IcimsJobs      $src) }
             'UltiPro'    { $got = @(Get-UltiProJobs    $src) }
             'Dayforce'   { $got = @(Get-DayforceJobs   $src) }
+            'Rippling'   { $got = @(Get-RipplingJobs   $src) }
         }
         Write-Log "   $($got.Count) postings"
         $all += $got
@@ -2087,6 +2254,7 @@ if (-not $SkipDetail) {
                 'iCIMS'     { Add-IcimsDetail     $p }
                 'UltiPro'   { Add-UltiProDetail   $p }
                 'Dayforce'  { Add-DayforceDetail  $p }
+                'Rippling'  { Add-RipplingDetail  $p }
             }
         }
     }
