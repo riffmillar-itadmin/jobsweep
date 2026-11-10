@@ -124,6 +124,7 @@
     Greenhouse or Lever source. 429 backs off 15/30/60 s and reads an HTTP-date
     Retry-After; a lost Microsoft query is named NOT COLLECTED. UNDER-COLLECTED
     fires only when rows are missing beyond the ones deliberately skipped.
+    1.6.2 (2026-11-10): README: How this is built. No code changes.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -156,7 +157,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.6.1'
+$JobSweepVersion = '1.6.2'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo

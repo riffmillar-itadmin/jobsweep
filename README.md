@@ -263,8 +263,19 @@ alongside the tests, and shows each finding as an annotation on its line.
 
 Windows PowerShell 5.1 or PowerShell 7. No modules.
 
+## How this is built
+
+I build JobSweep with Claude Code as a pair programmer, under the rules in
+[`CLAUDE.md`](CLAUDE.md), and I review every change before it is committed. The
+filter regression suite runs on Windows PowerShell 5.1 and PowerShell 7, and CI
+runs it and PSScriptAnalyzer lint on every pull request and every push to
+`main`. Every release is a signed tag. The AI writes drafts; the tests and I
+decide what ships.
+
 ## Changelog
 
+- **1.6.2** (2026-11-10): README: a How this is built section on how
+  JobSweep is written, reviewed, tested and released. No code changes.
 - **1.6.1** (2026-11-09): collector fixes from a week of sweep logs.
   - A Workday row with no `title` threw under StrictMode and lost the whole
     tenant. Workday, Greenhouse and Lever now skip and count such rows, and
