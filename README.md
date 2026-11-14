@@ -39,8 +39,9 @@ That is what the test suite is for.
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs and company names into `Sources` entries you can paste. See [Finding new sources](#finding-new-sources). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 415 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 454 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
+| `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
 | `CLAUDE.md` | ✅ | Rules for Claude Code sessions in this repo. Personal ones go in a gitignored `CLAUDE.local.md`. |
 | `prompts/build-tracking-board.md` | ✅ | A Claude prompt that turns your sweeps and your criteria into a job tracking board. |
@@ -172,7 +173,7 @@ one.
 ## Supported providers
 
 Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce, Rippling,
-and the Microsoft careers API. `JobSweep.local.example.psd1` documents where to find the token,
+Paylocity, and the Microsoft careers API. `JobSweep.local.example.psd1` documents where to find the token,
 tenant or board ID for each.
 
 ## Finding new sources
@@ -191,7 +192,10 @@ slug from a name and probes Greenhouse, Lever, Dayforce and Rippling. It checks 
 board answers, counts its postings and the titles that pass your title screen,
 skips what your profile already has, and prints `@{ Provider=... }` lines to
 paste into `Sources`. It never writes to a profile. A name-based hit is a guess,
-so open the board before you add it. Workday, iCIMS, UltiPro and ADP need a URL.
+so open the board before you add it. Workday, iCIMS, UltiPro, ADP and Paylocity
+need a URL; for Paylocity it is the board URL with the GUID in it
+(`recruiting.paylocity.com/recruiting/jobs/All/<GUID>`), since a posting URL
+does not name its board.
 
 Good places to find URLs:
 
@@ -231,14 +235,30 @@ process with the same `-SweepScript` / `-ProfilePath`, prints a summary, and
 exits 1 if either edition fails **or is not installed**. Use it before every
 commit.
 
-The summary is one table with everything a result needs: each edition's
-version, the profiles it ran against, and its pass, fail and skipped counts.
+Every test run, lint run and scout run ends the same way, so the result is easy
+to find and copy: two blank lines, a full-width `#` banner with the script,
+status and counts, then the target, run time and PowerShell version, one table
+with everything the result needs, and a matching RESULT bar. The bars are
+green when everything passed, dark yellow when something was skipped, and red
+when anything failed. A check that throws is counted as a failure, and the
+summary still prints.
 
 ```text
+########################################################################
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 908  Fail 0  Skip 0
+########################################################################
+Target:  .\Invoke-JobSweep.ps1
+Run:     2026-11-13 18:00
+PS:      Core 7.4.6
+
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  415    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  415    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  454    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  454    0       0 PASS
+
+########################################################################
+##  RESULT: PASS  (Pass 908  Fail 0  Skip 0)
+########################################################################
 ```
 
 GitHub Actions runs the same `-BothEditions` check on every push to `main`
@@ -251,6 +271,7 @@ The scripts also lint clean under [PSScriptAnalyzer](https://github.com/PowerShe
 ```powershell
 .\Test-JobSweepLint.ps1                            # PowerShell 7
 powershell.exe -File .\Test-JobSweepLint.ps1       # Windows PowerShell 5.1
+.\Test-JobSweepLint.ps1 -BothEditions              # both, one summary table
 ```
 
 It uses `PSScriptAnalyzerSettings.psd1`, installs the pinned analyzer version
@@ -275,6 +296,24 @@ decide what ships.
 
 ## Changelog
 
+- **1.8.0** (2026-11-13): a Paylocity provider, and one summary style for
+  every test run.
+  - Paylocity's documented job feed needs a key each employer keeps private,
+    so the collector reads the public board page
+    (`recruiting.paylocity.com/recruiting/jobs/All/<BoardId>`), which carries
+    the job list as JSON. Internal-only postings are left out. A board page
+    without that JSON is reported as an error, not as a quiet week.
+  - Postings that survive the title and location screen get their full
+    description and pay from their own page. The employer's Salary
+    Description wins over pay found in the text.
+  - The scout reads Paylocity board URLs (including other
+    `*recruiting.paylocity.com` hosts) and names the source from the URL.
+  - The filter suite, lint and the scout end with a coloured summary banner
+    (`JobSweep.Summary.ps1`). A check that throws is counted as a failure and
+    the summary still prints. `Test-JobSweepLint.ps1 -BothEditions` lints on
+    both editions with one summary.
+  - 39 new regression cases (454), with the Paylocity loop tested against
+    fake board and posting pages.
 - **1.7.0** (2026-11-10): a Rippling provider (`ats.rippling.com`).
   - The paged v2 list is read first, one row per posting with each location.
     If it fails, the older v1 list is the failover; it repeats a posting once

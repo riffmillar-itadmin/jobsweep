@@ -33,7 +33,12 @@ workflow belong in a gitignored `CLAUDE.local.md` beside this file, not here.
 - The collector supports Windows PowerShell 5.1 and PowerShell 7, and a pass on
   one says nothing about the other. Before every commit, run both of these:
   - `.\Test-JobSweepFilters.ps1 -BothEditions`
-  - `Test-JobSweepLint.ps1` under `pwsh` and under `powershell.exe`
+  - `.\Test-JobSweepLint.ps1 -BothEditions` (or the script under `pwsh` and
+    under `powershell.exe`)
+- Every test script, lint run and probe ends with the summary banner from
+  `JobSweep.Summary.ps1`: status and Pass/Fail/Skip counts, target, run time,
+  PowerShell version, one table, and a RESULT bar. A check that throws counts
+  as a failure and the summary still prints.
 - Lint fails only on Error, Warning or ParseError. Suppress a rule only with a
   `SuppressMessageAttribute` on the function, with a justification, or in
   `PSScriptAnalyzerSettings.psd1` with a comment saying why.
