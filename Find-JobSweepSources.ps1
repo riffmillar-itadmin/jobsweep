@@ -10,7 +10,7 @@
 
       1. works out the provider and its keys from a careers URL
          (Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce,
-         Rippling)
+         Rippling, Paylocity)
       2. or, given only a company name, guesses the slug and probes the providers
          that can be probed by name (Greenhouse, Lever, Dayforce, Rippling)
       3. checks that the board answers, counts its postings, and counts the titles
@@ -150,6 +150,18 @@ function ConvertFrom-CareersUrl {
     }
     $m = [regex]::Match($u, '(?i)^https?://api\.rippling\.com/platform/api/ats/v[0-9]+/board/([A-Za-z0-9_-]+)')
     if ($m.Success) { return @{ Provider = 'Rippling'; Board = $m.Groups[1].Value } }
+
+    # Paylocity: only a board URL names the board. A posting URL
+    # (/Recruiting/Jobs/Details/<id>) does not, so it is left unrecognised.
+    $m = [regex]::Match($u, '(?i)^https?://([a-z0-9-]*recruiting\.paylocity\.com)/recruiting/jobs/(?:All|List)/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:/([A-Za-z0-9_-]+))?')
+    if ($m.Success) {
+        $e = @{ Provider = 'Paylocity'; BoardId = $m.Groups[2].Value.ToLower() }
+        # The slug after the GUID is the employer's legal name, the best name the URL has.
+        if ($m.Groups[3].Success -and $m.Groups[3].Value) { $e['NameHint'] = ($m.Groups[3].Value -replace '[-_]+', ' ').Trim() }
+        $h = $m.Groups[1].Value.ToLower()
+        if ($h -ne 'recruiting.paylocity.com') { $e['PlcHost'] = "https://$h" }
+        return $e
+    }
     return $null
 }
 
@@ -186,6 +198,7 @@ function Get-SourceKey {
             return 'dayforce|' + (& $g 'Namespace') + '|' + $b
         }
         'Rippling'   { return 'rippling|' + (& $g 'Board') }
+        'Paylocity'  { return 'paylocity|' + (& $g 'BoardId') }
         default      { return ([string]$Src.Provider).ToLower() + '|' + (& $g 'Company') }
     }
 }
@@ -193,7 +206,7 @@ function Get-SourceKey {
 function Format-SourceEntry {
     <# One Sources line in the profile's own style, keys in a fixed order. #>
     param([hashtable]$Src)
-    $order = @('Provider', 'Company', 'Token', 'WdHost', 'Tenant', 'Site', 'BaseUrl', 'UkgHost', 'BoardId', 'Cid', 'CcId', 'Namespace', 'Board')
+    $order = @('Provider', 'Company', 'Token', 'WdHost', 'Tenant', 'Site', 'BaseUrl', 'UkgHost', 'PlcHost', 'BoardId', 'Cid', 'CcId', 'Namespace', 'Board')
     $q = { param($s) "'" + ([string]$s -replace "'", "''") + "'" }
     $parts = foreach ($k in $order) { if ($Src.ContainsKey($k) -and $Src[$k]) { '{0}={1}' -f $k, (& $q $Src[$k]) } }
     return '@{ ' + ($parts -join '; ') + ' }'
@@ -202,7 +215,7 @@ function Format-SourceEntry {
 function Get-NameFromSource {
     <# A placeholder company name when a URL came without one: the slug or tenant. #>
     param([hashtable]$Src)
-    foreach ($k in 'Token', 'Tenant', 'Namespace', 'Board') { if ($Src.ContainsKey($k) -and $Src[$k]) { return [string]$Src[$k] } }
+    foreach ($k in 'NameHint', 'Token', 'Tenant', 'Namespace', 'Board') { if ($Src.ContainsKey($k) -and $Src[$k]) { return [string]$Src[$k] } }
     if ($Src.ContainsKey('BaseUrl') -and $Src.BaseUrl) { return (([uri]$Src.BaseUrl).Host -replace '^careers-', '' -replace '\.icims\.com$', '') }
     return [string]$Src.Provider
 }
@@ -281,6 +294,20 @@ function Invoke-SourceProbe {
                 $r.Postings = if ((& $prop $j 'totalItems') -and $j.totalItems) { [int]$j.totalItems } else { $items.Count }
                 $r.Titles = @($items | Where-Object { & $prop $_ 'name' } | ForEach-Object { [string]$_.name })
                 if ($r.Postings -gt $items.Count) { $r.Note = 'titles from the first page only' }
+            }
+            'Paylocity' {
+                $plc = 'https://recruiting.paylocity.com'; if ($Src.ContainsKey('PlcHost') -and $Src.PlcHost) { $plc = $Src.PlcHost }
+                # Invoke-RestMethod hands an HTML page back as its text.
+                $h = [string](Invoke-ScoutRequest "$plc/recruiting/jobs/All/$($Src.BoardId)")
+                $m = [regex]::Match($h, '(?s)window\.pageData\s*=\s*(\{.*?\});\s*\r?\n')
+                if (-not $m.Success) { $r.Note = 'board page has no job list (window.pageData)' }
+                else {
+                    $pd = $m.Groups[1].Value | ConvertFrom-Json
+                    $jobs = @(); if ((& $prop $pd 'Jobs') -and $pd.Jobs) { $jobs = @($pd.Jobs) }
+                    $r.Answered = $true; $r.Postings = $jobs.Count
+                    $r.Titles = @($jobs | Where-Object { & $prop $_ 'JobTitle' } | ForEach-Object { [string]$_.JobTitle })
+                    if ((& $prop $pd 'ModuleTitle') -and $pd.ModuleTitle) { $r.Note = "board name: $($pd.ModuleTitle)" }
+                }
             }
             default { $r.Note = "not probed: run Invoke-JobSweep.ps1 -Source $($Src.Provider) -DryRun with the entry added" }
         }
@@ -396,20 +423,25 @@ $results = foreach ($w in $work) {
 }
 $results = @($results)
 
-$results | Select-Object Company, Provider, Status, Postings, TitleMatches, Note |
-    Format-Table -AutoSize -Wrap | Out-String -Width 300 | Write-Host
-
 $new = @($results | Where-Object { $_.Entry })
 if ($new.Count -gt 0) {
-    Write-Host "Paste into Sources in your local profile (check name guesses first):" -ForegroundColor Cyan
+    Write-Host "`nPaste into Sources in your local profile (check name guesses first):" -ForegroundColor Cyan
     foreach ($n in $new) { Write-Host "    $($n.Entry)" }
 } else {
-    Write-Host 'No new sources found.'
+    Write-Host "`nNo new sources found."
 }
-$counts = $results | Group-Object Status | ForEach-Object { '{0} {1}' -f $_.Count, $_.Name }
-Write-Host ("`nScouted {0} input(s): {1}" -f $work.Count, ($counts -join ', '))
 
 if ($OutFile) {
     $results | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $OutFile -Encoding UTF8
     Write-Host "Wrote $OutFile"
 }
+
+# Pass: the board answered, or the source is already in the profile.
+# Skip: nothing to probe (not found, unrecognised URL, -NoProbe).
+# Fail: a board named by its URL did not answer.
+$sPass = @($results | Where-Object { $_.Status -in 'new', 'new (name guess, check it)', 'already in profile' }).Count
+$sFail = @($results | Where-Object { $_.Status -eq 'no answer' }).Count
+. (Join-Path $PSScriptRoot 'JobSweep.Summary.ps1')
+Write-JobSweepSummary -Script 'Find-JobSweepSources.ps1' -Target ("{0} input(s) against {1}" -f $work.Count, (($ProfilePath | ForEach-Object { Split-Path $_ -Leaf }) -join ' + ')) `
+    -Rows @($results | Select-Object Company, Provider, Status, Postings, TitleMatches, Note) `
+    -Pass $sPass -Fail $sFail -Skip ($results.Count - $sPass - $sFail)

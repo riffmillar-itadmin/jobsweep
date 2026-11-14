@@ -30,7 +30,7 @@
 
 .PARAMETER Source
     Run only one provider: Greenhouse, Lever, Workday, Microsoft, ADP, iCIMS,
-    UltiPro, Dayforce or Rippling. Omit for all.
+    UltiPro, Dayforce, Rippling or Paylocity. Omit for all.
 
 .PARAMETER DryRun
     Fetch, screen and report, but do NOT update the seen-state file. Safe to re-run.
@@ -128,6 +128,10 @@
     1.7.0 (2026-11-10): Rippling provider (ats.rippling.com) -- paged v2 list with
     the v1 list as failover, one posting per id, description, posted date and pay
     from each survivor's own record. The scout reads Rippling URLs and probes them.
+    1.8.0 (2026-11-13): Paylocity provider (recruiting.paylocity.com) -- the job
+    list from the public board page's embedded JSON, description and Salary
+    Description from each survivor's own page. Tests, lint and the scout end with
+    a coloured summary banner; lint gains -BothEditions.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -138,7 +142,7 @@ param(
     # Resolved after the profiles load: this parameter, else OutputRoot in a
     # profile, else the folder this script lives in.
     [string] $OutputRoot,
-    [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro','Dayforce','Rippling')]
+    [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro','Dayforce','Rippling','Paylocity')]
     [string] $Source,
     [switch] $DryRun,
     [switch] $SkipDetail,
@@ -160,7 +164,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.7.0'
+$JobSweepVersion = '1.8.0'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -2103,6 +2107,126 @@ function Add-RipplingDetail {
     Start-Sleep -Milliseconds $script:Throttle
 }
 
+# ---- Paylocity --------------------------------------------------------------
+# recruiting.paylocity.com, added 1.8.0. Paylocity's documented job feed needs a
+# key each employer keeps private, so the collector reads what every board shows
+# the public instead: the board page /recruiting/jobs/All/<BoardId> carries the
+# whole list as JSON in `window.pageData = {...};` near the end of the page. The
+# list has title, location, remote flag and posted date but only a short snippet
+# of the description; the full text and the employer's Salary Description are on
+# each posting's own page, /Recruiting/Jobs/Details/<JobId>, which the detail pass
+# reads for the postings that survive the title and location screen.
+
+function Get-PaylocityPageData {
+    <# The window.pageData object from a board page, or $null when the page has
+       none. The match ends at ";" plus a line break, because descriptions inside
+       the JSON contain semicolons. Pure, so the suite can test it. #>
+    param([string]$Html)
+    if (-not $Html) { return $null }
+    $m = [regex]::Match($Html, '(?s)window\.pageData\s*=\s*(\{.*?\});\s*\r?\n')
+    if (-not $m.Success) { return $null }
+    return ($m.Groups[1].Value | ConvertFrom-Json)
+}
+
+function ConvertFrom-PaylocityJob {
+    <# One pageData.Jobs[] entry reduced to @{ Id; Title; Location; Posted; Internal }.
+       Returns $null for a row with no id or no title. Location is "City, ST" from
+       JobLocation where it has them, else the employer's site label; a remote
+       posting puts Remote in front, and a label that only says remote is dropped
+       as saying nothing more. #>
+    param($Job)
+    $id = [string](Get-JsonValue $Job 'JobId')
+    $title = [string](Get-JsonValue $Job 'JobTitle')
+    if (-not $id -or [string]::IsNullOrWhiteSpace($title)) { return $null }
+    $locs = @()
+    $jl = Get-JsonValue $Job 'JobLocation'
+    $city = [string](Get-JsonValue $jl 'City'); $st = [string](Get-JsonValue $jl 'State')
+    if ($city -and $st) { $locs += "$city, $st" } elseif ($city) { $locs += $city }
+    $label = [string](Get-JsonValue $Job 'LocationName')
+    if (-not $locs -and $label -and $label -notmatch '(?i)\bremote\b') { $locs += $label.Trim() }
+    $remote = [bool](Get-JsonValue $Job 'IsRemote')
+    if ($remote -or (-not $locs -and $label -match '(?i)\bremote\b')) { $locs = @('Remote') + $locs }
+    return @{
+        Id = $id; Title = $title.Trim(); Location = ($locs -join ' | ')
+        Posted = (ConvertTo-IsoText (Get-JsonValue $Job 'PublishedDate'))
+        Internal = [bool](Get-JsonValue $Job 'IsInternal')
+    }
+}
+
+function ConvertFrom-PaylocityDetail {
+    <# A posting page reduced to @{ Content; Salary; JobType }. The page lays its
+       parts out as <div class="job-listing-header">Name</div> followed by the
+       part itself. Content is Description then Requirements; Salary is the first
+       block under Salary Description, without the notices some employers put
+       after it. Pure, so the suite can test it. #>
+    param([string]$Html)
+    $parts = @{}
+    $rx = '(?is)<div class="job-listing-header">\s*([^<]+?)\s*</div>(.*?)(?=<div class="job-listing-header">|<div class="preview-bottom-apply-btn"|\z)'
+    foreach ($m in [regex]::Matches([string]$Html, $rx)) {
+        $name = $m.Groups[1].Value.Trim()
+        if (-not $parts.ContainsKey($name)) { $parts[$name] = $m.Groups[2].Value }
+    }
+    $first = { param($k)
+        if (-not $parts.ContainsKey($k)) { return '' }
+        $b = [regex]::Match($parts[$k], '(?is)<div[^>]*>(.*?)</div>')
+        if ($b.Success) { return (Convert-HtmlToText $b.Groups[1].Value) }
+        return (Convert-HtmlToText $parts[$k]) }
+    $text = @()
+    foreach ($k in 'Description', 'Requirements') {
+        if ($parts.ContainsKey($k)) { $t = Convert-HtmlToText $parts[$k]; if ($t) { $text += $t } }
+    }
+    return @{ Content = ($text -join "`n`n"); Salary = (& $first 'Salary Description'); JobType = (& $first 'Job Type') }
+}
+
+function Get-PaylocityJobs {
+    param($Src)
+    $plcHost = 'https://recruiting.paylocity.com'
+    if ($Src.ContainsKey('PlcHost') -and $Src.PlcHost) { $plcHost = ([string]$Src.PlcHost).TrimEnd('/') }
+    $board = [string]$Src.BoardId
+    $html = Invoke-Html "$plcHost/recruiting/jobs/All/$board"
+    $pd = Get-PaylocityPageData $html
+    # A board page without pageData means Paylocity changed the page, not that the
+    # employer has no jobs. Say so rather than report a quiet week.
+    if ($null -eq $pd) { throw "Paylocity board $board : no window.pageData on the page -- the page layout may have changed" }
+    $out = @()
+    $noTitle = 0; $internal = 0
+    foreach ($j in @(Get-JsonValue $pd 'Jobs')) {
+        if ($null -eq $j) { continue }
+        $f = ConvertFrom-PaylocityJob $j
+        if ($null -eq $f) { $noTitle++; continue }
+        if ($f.Internal) { $internal++; continue }
+        $url = "$plcHost/Recruiting/Jobs/Details/$($f.Id)"
+        $out += (New-Posting -Source 'Paylocity' -Company $Src.Company -Title $f.Title `
+                    -Location $f.Location -Url $url -ReqId $f.Id -Posted $f.Posted -Content '' |
+                 Add-Member -NotePropertyName DetailPath -NotePropertyValue $url -PassThru)
+    }
+    if ($noTitle -gt 0) { Write-Log "   Paylocity $($Src.Company): skipped $noTitle row(s) with no id or title" 'WARN' }
+    $note = if ($internal -gt 0) { "; $internal internal-only posting(s) left out" } else { '' }
+    Write-Log ("   Paylocity {0}: {1} postings on board '{2}'{3}" -f $Src.Company, $out.Count, [string](Get-JsonValue $pd 'ModuleTitle'), $note)
+    return $out
+}
+
+function Add-PaylocityDetail {
+    <# Full description and pay from the posting's own page. The employer's Salary
+       Description wins over pay found in the text, since it is the field the
+       employer filled in for pay. #>
+    param($Posting)
+    try {
+        $d = ConvertFrom-PaylocityDetail (Invoke-Html $Posting.DetailPath)
+        $Posting.Content      = $d.Content
+        $pay = ''
+        if ($d.Salary) { $pay = Get-PayRange $d.Salary }
+        if (-not $pay) { $pay = Get-PayRange $d.Content }
+        $Posting.Pay          = $pay
+        $Posting.Degree       = Get-DegreeFlag $Posting.Content
+        $Posting.NeedsLicence = [bool](Test-LicenceRequired $Posting.Content)
+        if (-not $d.Content) { Write-Log "  detail for $($Posting.Company) / $($Posting.Title) had no Description section" 'WARN' }
+    } catch {
+        Write-Log "  detail fetch failed for $($Posting.Company) / $($Posting.Title): $($_.Exception.Message)" 'WARN'
+    }
+    Start-Sleep -Milliseconds $script:Throttle
+}
+
 # ============================================================================
 #  MAIN
 # ============================================================================
@@ -2206,6 +2330,7 @@ foreach ($src in $sources) {
             'UltiPro'    { $got = @(Get-UltiProJobs    $src) }
             'Dayforce'   { $got = @(Get-DayforceJobs   $src) }
             'Rippling'   { $got = @(Get-RipplingJobs   $src) }
+            'Paylocity'  { $got = @(Get-PaylocityJobs  $src) }
         }
         Write-Log "   $($got.Count) postings"
         $all += $got
@@ -2255,6 +2380,7 @@ if (-not $SkipDetail) {
                 'UltiPro'   { Add-UltiProDetail   $p }
                 'Dayforce'  { Add-DayforceDetail  $p }
                 'Rippling'  { Add-RipplingDetail  $p }
+                'Paylocity' { Add-PaylocityDetail $p }
             }
         }
     }

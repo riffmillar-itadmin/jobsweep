@@ -85,10 +85,17 @@ if ($BothEditions) {
         }
     }
 
-    Write-Host "`n==== summary ====" -ForegroundColor Cyan
-    # Out-String with a wide line so a long profile list is not cut to the window.
-    $results | Format-Table -AutoSize | Out-String -Width 400 | Write-Host
-    if (@($results | Where-Object { $_.Result -ne 'PASS' }).Count -gt 0) { exit 1 }
+    $results = @($results)
+    $num = { param($v) if ("$v" -match '^\d+$') { [int]$v } else { 0 } }
+    $sumPass = 0; $sumFail = 0; $sumSkip = 0
+    foreach ($r in $results) { $sumPass += & $num $r.Pass; $sumFail += & $num $r.Fail; $sumSkip += & $num $r.Skipped }
+    # An edition that is missing or died counts as a failure even with no FAIL rows.
+    $bad = @($results | Where-Object { $_.Result -ne 'PASS' }).Count
+    if ($bad -gt 0 -and $sumFail -eq 0) { $sumFail = $bad }
+    . (Join-Path $PSScriptRoot 'JobSweep.Summary.ps1')
+    Write-JobSweepSummary -Script 'Test-JobSweepFilters.ps1 -BothEditions' -Target $SweepScript `
+        -Rows $results -Pass $sumPass -Fail $sumFail -Skip $sumSkip
+    if ($bad -gt 0) { exit 1 }
     exit 0
 }
 
@@ -111,7 +118,9 @@ $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteT
           'Get-JsonValue','Get-WorkdayShortfall','ConvertFrom-RetryAfter','Get-RetryWait',
           'New-Posting','Convert-HtmlToText','Get-WorkdayJobs','Get-GreenhouseJobs','Get-LeverJobs',
           'ConvertFrom-RipplingListItem','Merge-RipplingRow','Get-RipplingPay','ConvertTo-IsoText',
-          'Get-RipplingJobs','Add-RipplingDetail')
+          'Get-RipplingJobs','Add-RipplingDetail',
+          'Get-PaylocityPageData','ConvertFrom-PaylocityJob','ConvertFrom-PaylocityDetail',
+          'Get-PaylocityJobs','Add-PaylocityDetail')
 $parts = @()
 
 $assign = @($ast.FindAll({ param($n)
@@ -171,6 +180,11 @@ function CheckGeo {
     param([string]$What, $Got, $Want)
     if ($script:exampleGeo) { Check $What $Got $Want } else { $script:skipped++ }
 }
+
+# A check that throws stops the cases after it, but never the summary: the throw
+# is counted as a FAIL and named, and the summary below still prints.
+$stoppedBy = ''
+try {
 
 Write-Host "`n-- LOCATION: onsite still screened as before --"
 CheckGeo 'Harborview onsite'        (Test-LocationMatch 'Harborview, WM').Ok            $true
@@ -862,6 +876,115 @@ Check 'Rippling pay: null'               (Get-RipplingPay $null) ''
 Check 'ISO text from a DateTime'         (ConvertTo-IsoText ([datetime]::new(2026, 11, 2, 17, 15, 0, [DateTimeKind]::Utc))) '2026-11-02T17:15:00Z'
 Check 'ISO text from a string'           (ConvertTo-IsoText '2026-11-02T09:15:00-08:00') '2026-11-02T09:15:00-08:00'
 
+# ---- PAYLOCITY, added 2026-11-13 (1.8.0) ----------------------------------
+# Fictional board and posting pages in the shape recruiting.paylocity.com serves:
+# the list as JSON in window.pageData (its descriptions carry semicolons, so the
+# match must end at ";" plus a line break), the full text and the employer's
+# Salary Description only on each posting's own page.
+Write-Host "`n-- PAYLOCITY: board pageData, detail sections, pay from Salary Description --"
+$plcBoard = @'
+<html><head><script>var other = { a: 1 };
+</script></head><body><div id="app"></div>
+<script>
+    window.pageData = {"ModuleTitle":"Example Clinic","Jobs":[
+      {"JobId":9000101,"JobTitle":"Endpoint Systems Administrator","LocationName":"REMOTE WORKER","PublishedDate":"2026-10-20T09:34:26-07:00","Description":"We support clinics; you support us","IsInternal":false,"IsRemote":true,"JobLocation":{"City":null,"State":null,"Country":"USA"}},
+      {"JobId":9000102,"JobTitle":"IT Support Specialist","LocationName":"Harborview Office","PublishedDate":"2026-11-01T08:00:00-07:00","IsInternal":false,"IsRemote":false,"JobLocation":{"City":"Harborview","State":"WM","Country":"USA"}},
+      {"JobId":9000103,"JobTitle":"Network Analyst","LocationName":"Brookfield Campus","IsInternal":false,"IsRemote":true,"JobLocation":{"City":"Brookfield","State":"WM"}},
+      {"JobId":9000104,"JobTitle":"Help Desk Lead","LocationName":"Main Office","IsInternal":true,"IsRemote":false,"JobLocation":{"City":"Harborview","State":"WM"}},
+      {"JobId":9000105,"JobTitle":"","LocationName":"Main Office","IsInternal":false},
+      {"JobId":9000106,"JobTitle":"Systems Engineer","LocationName":"Millbrook Site","IsInternal":false,"IsRemote":false,"JobLocation":null}
+    ]};
+    window.other = 2;
+</script></body></html>
+'@
+$plcDetail = @'
+<div class="job-preview-details">
+  <div class="vertical-padding">
+    <div class="job-listing-header">Job Type</div>
+    <div>Full-time</div>
+  </div>
+  <div class="job-listing-header">Description</div>
+  <div><p>Run <strong>Intune</strong> and Autopilot; keep endpoints healthy.</p><ul><li>Entra ID</li></ul></div>
+  <div class="job-listing-header">Requirements</div>
+  <div data-bind="html: Job.Requirements"><p>2+ years of endpoint support.</p></div>
+  <div class="job-listing-header">Salary Description</div>
+  <div>$80,000 - $92,000</div>
+  <div style="padding-top: 10px;"><p>Notice: a $5,000 sign-on bonus is not base pay.</p></div>
+</div>
+<div class="preview-bottom-apply-btn"><a href="/Recruiting/Jobs/Apply/9000101">Apply</a></div>
+'@
+$pd = Get-PaylocityPageData $plcBoard
+Check 'Paylocity pageData read'             (@($pd.Jobs).Count) 6
+Check 'Paylocity pageData ends at ;newline' $pd.ModuleTitle 'Example Clinic'
+Check 'Paylocity no pageData is null'       ($null -eq (Get-PaylocityPageData '<html>no data</html>')) $true
+$pj = @(@($pd.Jobs) | ForEach-Object { ConvertFrom-PaylocityJob $_ })
+Check 'Paylocity remote label only'         $pj[0].Location 'Remote'
+Check 'Paylocity city and state'            $pj[1].Location 'Harborview, WM'
+Check 'Paylocity remote plus city'          $pj[2].Location 'Remote | Brookfield, WM'
+Check 'Paylocity internal flagged'          $pj[3].Internal $true
+Check 'Paylocity no title is null'          ($null -eq $pj[4]) $true
+Check 'Paylocity site label fallback'       $pj[5].Location 'Millbrook Site'
+Check 'Paylocity posted kept as ISO'        ($pj[0].Posted -like '2026-10-20T*') $true
+Check 'Paylocity id is text'                $pj[0].Id '9000101'
+
+$pdt = ConvertFrom-PaylocityDetail $plcDetail
+Check 'Paylocity detail: description first' ($pdt.Content -like 'Run Intune and Autopilot; keep endpoints healthy.*2+ years of endpoint support.') $true
+Check 'Paylocity detail: salary block only' $pdt.Salary '$80,000 - $92,000'
+Check 'Paylocity detail: job type'          $pdt.JobType 'Full-time'
+Check 'Paylocity detail: notice left out'   ($pdt.Content -like '*sign-on*') $false
+$pdn = ConvertFrom-PaylocityDetail '<div class="job-listing-header">Description</div><div>Hourly role.</div>'
+Check 'Paylocity detail: no salary section' $pdn.Salary ''
+Check 'Paylocity detail: empty page'        (ConvertFrom-PaylocityDetail '').Content ''
+
+$script:testLog = @()
+function Write-Log {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '',
+        Justification = 'Test stand-in for the collector''s own Write-Log; records lines instead of printing them.')]
+    param([string]$Message, [string]$Level = 'INFO')
+    $script:testLog += "[$Level] $Message"
+}
+$script:plcNoData = $false
+function Invoke-Html { param([string]$Uri)
+    if ($Uri -like '*/recruiting/jobs/All/*') { if ($script:plcNoData) { return '<html>maintenance</html>' } else { return $plcBoard } }
+    if ($Uri -like '*/Recruiting/Jobs/Details/9000101') { return $plcDetail }
+    if ($Uri -like '*/Recruiting/Jobs/Details/9000102') { return '<div class="job-listing-header">Description</div><div>Desk support. Pay is $24.00 - $28.00 per hour.</div>' }
+    throw "HTTP 404 from the fake detail $Uri"
+}
+$plcSrc = @{ Company = 'Example Clinic'; BoardId = '00000000-0000-0000-0000-0000000000aa' }
+$pl = @(Get-PaylocityJobs $plcSrc)
+Check 'Paylocity: internal and titleless left out' (($pl | ForEach-Object Title) -join ', ') 'Endpoint Systems Administrator, IT Support Specialist, Network Analyst, Systems Engineer'
+Check 'Paylocity: titleless row counted'     (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like '*Paylocity Example Clinic: skipped 1 row*' }).Count) 1
+Check 'Paylocity: internal noted in log'     (@($script:testLog | Where-Object { $_ -like '*1 internal-only posting(s) left out*' }).Count) 1
+Check 'Paylocity: key by job id'             $pl[0].Key 'Paylocity|9000101'
+Check 'Paylocity: url is the posting page'   $pl[0].Url 'https://recruiting.paylocity.com/Recruiting/Jobs/Details/9000101'
+Check 'Paylocity: no text before detail'     $pl[0].Content ''
+$plH = @(Get-PaylocityJobs @{ Company = 'Example Clinic'; BoardId = '00000000-0000-0000-0000-0000000000aa'; PlcHost = 'https://2000recruiting.paylocity.com/' })
+Check 'Paylocity: PlcHost used'              $plH[0].DetailPath 'https://2000recruiting.paylocity.com/Recruiting/Jobs/Details/9000101'
+Add-PaylocityDetail $pl[0]
+Check 'Paylocity detail: pay from Salary Description' $pl[0].Pay '$80,000 - $92,000'
+Check 'Paylocity detail: content filled'     ($pl[0].Content -like 'Run Intune*') $true
+Add-PaylocityDetail $pl[1]
+Check 'Paylocity detail: pay from text'      ($pl[1].Pay -like '*24*28*') $true
+Add-PaylocityDetail $pl[2]
+Check 'Paylocity detail: failure is a warning' (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like '*detail fetch failed for Example Clinic / Network Analyst*' }).Count) 1
+Check 'Paylocity detail: failure keeps row'  $pl[2].Title 'Network Analyst'
+$script:plcNoData = $true
+$plcErr = ''
+try { $null = Get-PaylocityJobs $plcSrc } catch { $plcErr = $_.Exception.Message }
+Check 'Paylocity: missing pageData is an error, not a quiet week' ($plcErr -like '*no window.pageData*') $true
+Remove-Item Function:\Invoke-Html, Function:\Write-Log
+
+# ---- SUMMARY BANNER (JobSweep.Summary.ps1), added 2026-11-13 ------------
+Write-Host "`n-- SUMMARY BANNER: status from the counts --"
+$sumPath = Join-Path (Split-Path -Parent $SweepScript) 'JobSweep.Summary.ps1'
+Check 'summary helper ships beside the sweep' (Test-Path -LiteralPath $sumPath) $true
+if (Test-Path -LiteralPath $sumPath) {
+    . $sumPath
+    Check 'status: all pass'        (Get-JobSweepStatus -Fail 0 -Skip 0) 'PASS'
+    Check 'status: skips'           (Get-JobSweepStatus -Fail 0 -Skip 21) 'PASS WITH SKIPS'
+    Check 'status: a fail wins'     (Get-JobSweepStatus -Fail 1 -Skip 21) 'FAIL'
+}
+
 Check 'Get-JsonValue: missing is null'   ($null -eq (Get-JsonValue ([pscustomobject]@{ a = 1 }) 'title')) $true
 Check 'Get-JsonValue: null object'       ($null -eq (Get-JsonValue $null 'title')) $true
 Check 'Get-JsonValue: present'           (Get-JsonValue ([pscustomobject]@{ title = 'x' }) 'title') 'x'
@@ -890,7 +1013,7 @@ Write-Host "`n-- SOURCES: every entry has the keys its provider reads --"
 $needs = @{
     Greenhouse = @('Token'); Lever = @('Token'); Workday = @('WdHost', 'Tenant', 'Site'); iCIMS = @('BaseUrl')
     UltiPro = @('Tenant', 'BoardId'); ADP = @('Cid', 'CcId'); Dayforce = @('Namespace'); Microsoft = @('Queries')
-    Rippling = @('Board')
+    Rippling = @('Board'); Paylocity = @('BoardId')
 }
 $badSrc = @()
 foreach ($s in @($Config.Sources)) {
@@ -936,6 +1059,9 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'Rippling with locale'   (& $u 'https://ats.rippling.com/en-GB/example-robotics-careers/jobs')   "@{ Provider='Rippling'; Board='example-robotics-careers' }"
     Check 'Rippling API URL'       (& $u 'https://api.rippling.com/platform/api/ats/v1/board/example-robotics/jobs') "@{ Provider='Rippling'; Board='example-robotics' }"
     Check 'Rippling bare host'     (& $u 'https://ats.rippling.com/')                                     'none'
+    Check 'Paylocity board'        (& $u 'https://recruiting.paylocity.com/Recruiting/Jobs/All/00000000-0000-0000-0000-0000000000AA/Example-Clinic') "@{ Provider='Paylocity'; BoardId='00000000-0000-0000-0000-0000000000aa' }"
+    Check 'Paylocity other host'   (& $u 'https://2000recruiting.paylocity.com/recruiting/jobs/All/00000000-0000-0000-0000-0000000000aa') "@{ Provider='Paylocity'; PlcHost='https://2000recruiting.paylocity.com'; BoardId='00000000-0000-0000-0000-0000000000aa' }"
+    Check 'Paylocity posting only' (& $u 'https://recruiting.paylocity.com/Recruiting/Jobs/Details/9000101') 'none'
     Check 'unknown site'           (& $u 'https://www.example.com/careers')                                'none'
     Check 'blank URL'              (& $u '')                                                               'none'
 
@@ -950,6 +1076,8 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'key: iCIMS trailing slash'  (Get-SourceKey @{ Provider='iCIMS'; BaseUrl='https://careers-examplebank.icims.com/' }) 'icims|https://careers-examplebank.icims.com'
     Check 'entry quotes apostrophes'   (Format-SourceEntry @{ Provider='Lever'; Company="Example's Bakery"; Token='examples' }) "@{ Provider='Lever'; Company='Example''s Bakery'; Token='examples' }"
     Check 'key: Rippling board'        (Get-SourceKey @{ Provider='Rippling'; Board='Example-Robotics' }) 'rippling|example-robotics'
+    Check 'key: Paylocity board'       (Get-SourceKey @{ Provider='Paylocity'; BoardId='00000000-0000-0000-0000-0000000000AA' }) 'paylocity|00000000-0000-0000-0000-0000000000aa'
+    Check 'name from Paylocity slug'   (Get-NameFromSource (ConvertFrom-CareersUrl 'https://recruiting.paylocity.com/recruiting/jobs/All/00000000-0000-0000-0000-0000000000aa/Example-Clinic-LLC')) 'Example Clinic LLC'
     Check 'name from Rippling board'   (Get-NameFromSource @{ Provider='Rippling'; Board='example-robotics' }) 'example-robotics'
     Check 'name from iCIMS host'       (Get-NameFromSource @{ Provider='iCIMS'; BaseUrl='https://careers-examplebank.icims.com' }) 'examplebank'
 
@@ -961,6 +1089,12 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'line: blank skipped'    (& $l '   ')                                       'none'
 }
 
+} catch {
+    $fail++
+    $stoppedBy = "suite stopped at line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
+    Write-Host "  FAIL  $stoppedBy" -ForegroundColor Red
+}
+
 $skipNote = if ($skipped -gt 0) { "   SKIPPED $skipped example-geography checks (not the example profile -- cover your own places in Test-JobSweepProfile.ps1)" } else { '' }
 Write-Host ("`nPASS {0}   FAIL {1}{2}" -f $pass, $fail, $skipNote)
 if ($ResultPath) {
@@ -968,5 +1102,17 @@ if ($ResultPath) {
         Pass = $pass; Fail = $fail; Skipped = $skipped
         Profile = (($ProfilePath | ForEach-Object { Split-Path $_ -Leaf }) -join ' + ')
     } | ConvertTo-Json -Compress | Set-Content -LiteralPath $ResultPath -Encoding utf8
+}
+if (-not $ResultPath) {
+    # A -BothEditions child leaves the banner to the parent, which prints one for both.
+    . (Join-Path $PSScriptRoot 'JobSweep.Summary.ps1')
+    $row = [pscustomobject][ordered]@{
+        Edition = $PSVersionTable.PSEdition; Version = "$($PSVersionTable.PSVersion)"
+        Profile = (($ProfilePath | ForEach-Object { Split-Path $_ -Leaf }) -join ' + ')
+        Pass = $pass; Fail = $fail; Skipped = $skipped
+        Result = $(if ($fail -gt 0) { 'FAIL' } else { 'PASS' })
+    }
+    if ($stoppedBy) { $row | Add-Member -NotePropertyName Note -NotePropertyValue $stoppedBy }
+    Write-JobSweepSummary -Script 'Test-JobSweepFilters.ps1' -Target $SweepScript -Rows @($row) -Pass $pass -Fail $fail -Skip $skipped
 }
 if ($fail -gt 0) { exit 1 }

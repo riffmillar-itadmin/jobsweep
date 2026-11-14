@@ -129,6 +129,7 @@ ClearanceScreen = 'check'
 #   ADP         Cid and CcId are query parameters on the careers URL
 #   Dayforce    jobs.dayforcehcm.com/en-US/<Namespace>/<Board>/jobs -- both in the URL
 #   Rippling    ats.rippling.com/<Board>/jobs           -- Board is in the URL, case and all
+#   Paylocity   recruiting.paylocity.com/recruiting/jobs/All/<BoardId> -- the GUID in the board URL
 #
 # Start with five or six employers you would actually work for, confirm the
 # sweep returns their postings, then grow the list.
@@ -163,6 +164,11 @@ Sources = @(
     # ---- Rippling: api.rippling.com/platform/api/ats/v2/board/<Board>/jobs
     # The slug is case-sensitive; copy it from the careers URL as it appears.
     @{ Provider='Rippling';   Company='Example Robotics';    Board='example-robotics-careers' }
+
+    # ---- Paylocity: the public board page recruiting.paylocity.com/recruiting/jobs/All/<BoardId>
+    # A posting URL (/Recruiting/Jobs/Details/<id>) does not name the board; open the
+    # employer's careers page or the posting's "view all jobs" link to find it.
+    @{ Provider='Paylocity';  Company='Example Clinic';      BoardId='00000000-0000-0000-0000-000000000000' }
 )
 
 }
