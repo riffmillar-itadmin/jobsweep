@@ -296,6 +296,10 @@ decide what ships.
 
 ## Changelog
 
+- **1.8.2** (2026-11-16): the 1.8.1 code under a new release number. The
+  first `v1.8.1` tag was pushed on the wrong commit and deleted, and with
+  immutable releases a deleted release's tag name can't be reused, so 1.8.1
+  has no release. No code changes.
 - **1.8.1** (2026-11-16): fixes from the 11 and 16 Nov sweep logs.
   - A Microsoft query that runs out of 429 retries is no longer lost. It is
     queued, and after every other source has run it is read again from the
