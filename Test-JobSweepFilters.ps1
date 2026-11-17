@@ -120,7 +120,9 @@ $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteT
           'ConvertFrom-RipplingListItem','Merge-RipplingRow','Get-RipplingPay','ConvertTo-IsoText',
           'Get-RipplingJobs','Add-RipplingDetail',
           'Get-PaylocityPageData','ConvertFrom-PaylocityJob','ConvertFrom-PaylocityDetail',
-          'Get-PaylocityJobs','Add-PaylocityDetail')
+          'Get-PaylocityJobs','Add-PaylocityDetail',
+          'Get-MicrosoftQuery','Get-MicrosoftGapText','Get-MicrosoftJobs','Get-RetryCoolOffWait',
+          'Invoke-MicrosoftRetryPass','Get-WebTimeoutParameter')
 $parts = @()
 
 $assign = @($ast.FindAll({ param($n)
@@ -973,6 +975,83 @@ $plcErr = ''
 try { $null = Get-PaylocityJobs $plcSrc } catch { $plcErr = $_.Exception.Message }
 Check 'Paylocity: missing pageData is an error, not a quiet week' ($plcErr -like '*no window.pageData*') $true
 Remove-Item Function:\Invoke-Html, Function:\Write-Log
+
+# ---- MICROSOFT RETRY PASS, added 2026-11-16 (1.8.1) ----------------------
+# On 16 Nov 2026 two Microsoft queries ran out of 429 retries part-way and their
+# tail was lost. The fake API here fails a page on demand; the retry pass must
+# pick the query up from the row where it stopped, without repeating rows.
+Write-Host "`n-- MICROSOFT: a query that runs out of retries is queued and resumed --"
+$script:testLog = @()
+function Write-Log {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '',
+        Justification = 'Test stand-in for the collector''s own Write-Log; records lines instead of printing them.')]
+    param([string]$Message, [string]$Level = 'INFO')
+    $script:testLog += "[$Level] $Message"
+}
+$script:Throttle = 0
+Set-Variable -Name PolitenessMs -Value 0   # read by Invoke-MicrosoftRetryPass through dynamic scope
+Set-Variable -Name MaxPerQuery -Value 60   # read by Get-MicrosoftQuery through dynamic scope
+$script:msFailAt = @{}    # "query|start" -> remaining failures
+$script:msCalls  = @()
+function Invoke-Json { param([string]$Uri)
+    $script:msCalls += $Uri
+    $q  = [uri]::UnescapeDataString([regex]::Match($Uri, 'query=([^&]+)').Groups[1].Value)
+    $st = [int]([regex]::Match($Uri, 'start=(\d+)').Groups[1].Value)
+    $k  = "$q|$st"
+    if ($script:msFailAt.ContainsKey($k) -and $script:msFailAt[$k] -gt 0) {
+        $script:msFailAt[$k]--
+        throw 'Response status code does not indicate success: 429 (Too Many Requests).'
+    }
+    if ($st -ge 30) { return [pscustomobject]@{ data = [pscustomobject]@{ positions = @() } } }
+    $rows = @(0..9 | ForEach-Object {
+        $n = $st + $_
+        [pscustomobject]@{ id = "$q-p$n"; atsJobId = "$q-$n"; name = "Systems Engineer $n"; positionUrl = "/careers/job/$n"; locations = @('Harborview, Westmark') } })
+    return [pscustomobject]@{ data = [pscustomobject]@{ positions = $rows } }
+}
+$msSrc = @{ Company = 'Example Corp'; Queries = @('systems', 'endpoint'); Locations = @('Westmark'); ThrottleMs = 0; RetryCoolOffSec = 1 }
+
+$script:MicrosoftRetry = @()
+$script:msFailAt = @{ 'systems|10' = 5 }
+$ms = @(Get-MicrosoftJobs $msSrc)
+Check 'Microsoft: rows before the failure kept'   (@($ms | Where-Object { $_.ReqId -like 'systems-*' }).Count) 10
+Check 'Microsoft: other query unaffected'         (@($ms | Where-Object { $_.ReqId -like 'endpoint-*' }).Count) 30
+Check 'Microsoft: failed query queued'            @($script:MicrosoftRetry).Count 1
+Check 'Microsoft: queued at the row it stopped'   $script:MicrosoftRetry[0].StartAt 10
+Check 'Microsoft: queue noted in the log'         (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like "*'systems' (Westmark) stopped at 10 rows*queued for a retry*" }).Count) 1
+
+$script:msFailAt = @{}
+$script:msCalls  = @()
+$msR = @(Invoke-MicrosoftRetryPass $script:MicrosoftRetry)
+Check 'Retry pass: resumes at start=10'           ($script:msCalls[0] -like '*query=systems*start=10') $true
+Check 'Retry pass: recovers the missing rows'     (($msR | ForEach-Object ReqId | Sort-Object { [int]($_ -split '-')[1] }) -join ',') ((10..29 | ForEach-Object { "systems-$_" }) -join ',')
+Check 'Retry pass: no row repeated'               (@($ms + $msR | ForEach-Object ReqId | Sort-Object -Unique).Count) 60
+Check 'Retry pass: recovery logged as OK'         (@($script:testLog | Where-Object { $_.StartsWith('[OK]') -and $_ -like "*'systems' (Westmark) recovered on retry: 30 rows*" }).Count) 1
+Check 'Retry pass: cool-off from the profile'    (@($script:testLog | Where-Object { $_ -match "retrying 1 query that did not finish \(waiting [01] s first\)" }).Count) 1
+
+# Still failing on the retry: named the way a lost query always was.
+$script:testLog = @(); $script:MicrosoftRetry = @()
+$script:msFailAt = @{ 'endpoint|0' = 10 }
+$null = @(Get-MicrosoftJobs $msSrc)
+$msR2 = @(Invoke-MicrosoftRetryPass $script:MicrosoftRetry)
+Check 'Retry pass: nothing gained is no rows'     $msR2.Count 0
+Check 'Retry pass: still lost is NOT COLLECTED'   (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like "*'endpoint' (Westmark) NOT COLLECTED this run after the retry*" }).Count) 1
+Check 'Retry pass: empty queue does nothing'      @(Invoke-MicrosoftRetryPass @()).Count 0
+
+Check 'gap text: none read'                       (Get-MicrosoftGapText 0) 'NOT COLLECTED this run'
+Check 'gap text: some read'                       (Get-MicrosoftGapText 40) 'only partly collected (40 rows)'
+$t0 = [datetime]::new(2026, 11, 16, 13, 20, 43)
+Check 'cool-off: full wait right after a failure' (Get-RetryCoolOffWait -CoolOffSec 120 -LastFailure $t0 -Now $t0) 120
+Check 'cool-off: time already passed counts'      (Get-RetryCoolOffWait -CoolOffSec 120 -LastFailure $t0 -Now $t0.AddSeconds(100)) 20
+Check 'cool-off: long past is no wait'            (Get-RetryCoolOffWait -CoolOffSec 120 -LastFailure $t0 -Now $t0.AddMinutes(10)) 0
+Remove-Item Function:\Invoke-Json, Function:\Write-Log
+
+Write-Host "`n-- WEB TIMEOUT: a stalled response body is bounded on PowerShell 7.4+ --"
+$wt7 = Get-WebTimeoutParameter -HasOperationTimeout $true
+$wt5 = Get-WebTimeoutParameter -HasOperationTimeout $false
+Check 'timeout: 7.4+ bounds the body read'        $wt7['OperationTimeoutSeconds'] 45
+Check 'timeout: 7.4+ keeps the connect limit'     $wt7['TimeoutSec'] 45
+Check 'timeout: 5.1 has no operation timeout'     $wt5.ContainsKey('OperationTimeoutSeconds') $false
+Check 'timeout: this host matches its cmdlet'     ((Get-Command Invoke-WebRequest).Parameters.ContainsKey('OperationTimeoutSeconds')) ($PSVersionTable.PSVersion -ge [version]'7.4')
 
 # ---- SUMMARY BANNER (JobSweep.Summary.ps1), added 2026-11-13 ------------
 Write-Host "`n-- SUMMARY BANNER: status from the counts --"
