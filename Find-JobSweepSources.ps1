@@ -236,6 +236,8 @@ function ConvertFrom-ScoutLine {
 #  NETWORK PROBES
 # ============================================================================
 
+$script:HasOperationTimeout = (Get-Command Invoke-RestMethod).Parameters.ContainsKey('OperationTimeoutSeconds')
+
 function Invoke-ScoutRequest {
     param([string]$Uri, [string]$Method = 'Get', $Body, [hashtable]$Headers, $WebSession)
     Start-Sleep -Milliseconds $script:ScoutThrottleMs
@@ -243,6 +245,8 @@ function Invoke-ScoutRequest {
     if ($null -ne $Body) { $p['Body'] = ($Body | ConvertTo-Json -Depth 6 -Compress); $p['ContentType'] = 'application/json' }
     if ($Headers)    { $p['Headers'] = $Headers }
     if ($WebSession) { $p['WebSession'] = $WebSession }
+    # PowerShell 7.4+: -TimeoutSec covers the connect only; this bounds a stalled body.
+    if ($script:HasOperationTimeout) { $p['OperationTimeoutSeconds'] = 30 }
     Invoke-RestMethod @p
 }
 

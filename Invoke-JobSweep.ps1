@@ -132,6 +132,11 @@
     list from the public board page's embedded JSON, description and Salary
     Description from each survivor's own page. Tests, lint and the scout end with
     a coloured summary banner; lint gains -BothEditions.
+    1.8.1 (2026-11-16): a Microsoft query that runs out of 429 retries is read
+    again after the other sources, from the row where it stopped, after a
+    cool-off (RetryCoolOffSec, default 120 s). On PowerShell 7.4+ a response body
+    that stops arriving now times out (-OperationTimeoutSeconds) instead of
+    stalling the run.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -164,7 +169,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.8.0'
+$JobSweepVersion = '1.8.1'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -177,6 +182,8 @@ $script:LogFile     = $null
 $script:ExitCode    = 0
 $script:Throttle    = $PolitenessMs   # per-provider override, set in the source loop
 $script:DayforceSessions = @{}         # namespace -> session and CSRF header, see Get-DayforceSession
+$script:MicrosoftRetry   = @()          # queries that ran out of retries, see Invoke-MicrosoftRetryPass
+$script:WebTimeout       = $null        # set once Get-WebTimeoutParameter is defined, see HELPERS
 
 # ============================================================================
 #  CONFIGURATION -- edit this block, not the logic below
@@ -566,6 +573,21 @@ function Convert-HtmlToText {
     return $t.Trim()
 }
 
+function Get-WebTimeoutParameter {
+    <# Timeouts for the web cmdlets. On PowerShell 7.4 and later -TimeoutSec is only
+       an alias of -ConnectionTimeoutSeconds: it limits the connect, and a response
+       body that stops arriving is read for ever unless -OperationTimeoutSeconds is
+       set as well. That is the likely cause of the 107-minute stall on one Workday
+       board on 11 Nov 2026, with no retry logged. Windows PowerShell 5.1 has no
+       such parameter, and its -TimeoutSec already covers the whole request. #>
+    param([bool]$HasOperationTimeout, [int]$Seconds = 45)
+    $p = @{ TimeoutSec = $Seconds }
+    if ($HasOperationTimeout) { $p['OperationTimeoutSeconds'] = $Seconds }
+    return $p
+}
+$script:WebTimeout = Get-WebTimeoutParameter -HasOperationTimeout (
+    (Get-Command Invoke-WebRequest).Parameters.ContainsKey('OperationTimeoutSeconds'))
+
 function Invoke-Json {
     <# -Headers and -WebSession were added for Dayforce, which wants a CSRF token
        in a header and the cookie that came with it. Both are optional, so every
@@ -573,7 +595,8 @@ function Invoke-Json {
     param([string]$Uri, [string]$Method = 'Get', $Body, [string]$Label,
           [hashtable]$Headers, [Microsoft.PowerShell.Commands.WebRequestSession]$WebSession)
     if (-not $Label) { $Label = ($Uri -split '\?')[0] }
-    $p = @{ Uri = $Uri; Method = $Method; UserAgent = $UserAgent; TimeoutSec = 45 }
+    $p = @{ Uri = $Uri; Method = $Method; UserAgent = $UserAgent }
+    foreach ($k in $script:WebTimeout.Keys) { $p[$k] = $script:WebTimeout[$k] }
     if ($null -ne $Body) {
         $p['Body']        = ($Body | ConvertTo-Json -Depth 6 -Compress)
         $p['ContentType'] = 'application/json'
@@ -585,8 +608,9 @@ function Invoke-Json {
 
 function Invoke-Html {
     param([string]$Uri)
+    $t = $script:WebTimeout
     return (Invoke-WithRetry -Label (($Uri -split '\?')[0]) -Action {
-        Invoke-WebRequest -Uri $Uri -UserAgent $UserAgent -UseBasicParsing -TimeoutSec 45
+        Invoke-WebRequest -Uri $Uri -UserAgent $UserAgent -UseBasicParsing @t
     }).Content
 }
 
@@ -1657,88 +1681,159 @@ function Add-UltiProDetail {
     Start-Sleep -Milliseconds $script:Throttle
 }
 
+function Get-MicrosoftQuery {
+    <# Reads one query/location pair from row StartAt until MaxPerQuery or the end
+       of the results. Returns Rows, Collected (rows read, counting StartAt) and
+       Failed with the Error text when a request gave up. Split out of
+       Get-MicrosoftJobs in 1.8.1 so a query that ran out of 429 retries can be
+       picked up again later in the run from the row where it stopped. #>
+    param([string]$Query, [string]$Location, [int]$StartAt = 0, [hashtable]$Seen)
+    $base      = 'https://apply.careers.microsoft.com'
+    $rows      = @()
+    $at        = $StartAt   # a separate name: $startAt would BE the parameter (names ignore case)
+    $lastFirst = ''
+    $failed    = $false
+    $err       = ''
+    Write-Host "   query '$Query'" -NoNewline -ForegroundColor DarkGray
+    do {
+        $uri = "$base/api/pcsx/search?domain=microsoft.com" +
+               "&query=$([uri]::EscapeDataString($Query))" +
+               "&location=$([uri]::EscapeDataString($Location))" +
+               "&start=$at"
+        try { $r = Invoke-Json $uri }
+        catch {
+            Write-Host ''
+            $failed = $true
+            $err    = $_.Exception.Message
+            break
+        }
+
+        $positions = @()
+        $data = Get-JsonValue $r 'data'
+        $pos  = Get-JsonValue $data 'positions'
+        if ($pos) { $positions = @($pos) }
+        if ($positions.Count -eq 0) { break }
+        Write-Host '.' -NoNewline -ForegroundColor DarkGray
+
+        # If 'start' is being ignored we will keep receiving the same first row. Stop.
+        $thisFirst = [string](Get-JsonValue $positions[0] 'id')
+        if ($thisFirst -eq $lastFirst) {
+            Write-Host ''
+            Write-Log "  Microsoft '$Query': paging is not advancing (start ignored) -- stopping this query" 'WARN'
+            break
+        }
+        $lastFirst = $thisFirst
+
+        foreach ($j in $positions) {
+            $posId = [string](Get-JsonValue $j 'id')
+            $id = [string](Get-JsonValue $j 'atsJobId')
+            if (-not $id) { $id = $posId }
+            if (-not $id) { continue }
+            if ($Seen.ContainsKey($id)) { continue }
+            $Seen[$id] = $true
+
+            $locText = ''
+            if ($j.PSObject.Properties.Name -contains 'standardizedLocations' -and $j.standardizedLocations) {
+                $locText = (@($j.standardizedLocations) -join '; ')
+            } elseif ($j.PSObject.Properties.Name -contains 'locations' -and $j.locations) {
+                $locText = (@($j.locations) -join '; ')
+            }
+
+            $posted = ''
+            if ($j.PSObject.Properties.Name -contains 'postedTs' -and $j.postedTs) {
+                $posted = ([datetimeoffset]::FromUnixTimeSeconds([int64]$j.postedTs)).ToString('yyyy-MM-dd')
+            }
+
+            $title = [string](Get-JsonValue $j 'name')
+            if (-not $title) { continue }
+            if ($j.PSObject.Properties.Name -contains 'department' -and $j.department) {
+                $title = "$title [$($j.department)]"
+            }
+
+            $rows += New-Posting -Source 'Microsoft' -Company 'Microsoft' -Title $title `
+                        -Location $locText -Url ("$base" + [string](Get-JsonValue $j 'positionUrl')) -ReqId $id `
+                        -Posted $posted -Content '' |
+                    Add-Member -NotePropertyName DetailPath `
+                        -NotePropertyValue "$base/api/pcsx/position_details?position_id=$posId&domain=microsoft.com&hl=en" -PassThru
+        }
+        $at += $positions.Count
+        Start-Sleep -Milliseconds $script:Throttle
+    } while ($positions.Count -gt 0 -and $at -lt $MaxPerQuery)
+    if (-not $failed) { Write-Host " $($at - $StartAt) seen" -ForegroundColor DarkGray }
+    return [pscustomobject]@{ Rows = @($rows); Collected = $at; Failed = $failed; Error = $err }
+}
+
+function Get-MicrosoftGapText {
+    <# How a query that gave up is named in the log: nothing read is NOT
+       COLLECTED, some rows read is partly collected. #>
+    param([int]$Collected)
+    if ($Collected -eq 0) { return 'NOT COLLECTED this run' }
+    return "only partly collected ($Collected rows)"
+}
+
 function Get-MicrosoftJobs {
+    <# apply.careers.microsoft.com/api/pcsx/search -> { data: { positions: [ ... ] } }
+       A query that runs out of 429 retries is queued in $script:MicrosoftRetry and
+       read again by Invoke-MicrosoftRetryPass after every other source. Before
+       1.8.1 it was simply lost: at ThrottleMs 6000 the 16 Nov 2026 run still lost
+       the tail of two queries. #>
     param($Src)
-    # apply.careers.microsoft.com/api/pcsx/search -> { data: { positions: [ ... ] } }
-    $base = 'https://apply.careers.microsoft.com'
     $out  = @()
     $seen = @{}
     foreach ($q in $Src.Queries) {
         foreach ($loc in $Src.Locations) {
-            $startAt  = 0
-            $newHere  = 0
-            $lastFirst = ''
-            Write-Host "   query '$q'" -NoNewline -ForegroundColor DarkGray
-            do {
-                $uri = "$base/api/pcsx/search?domain=microsoft.com" +
-                       "&query=$([uri]::EscapeDataString($q))" +
-                       "&location=$([uri]::EscapeDataString($loc))" +
-                       "&start=$startAt"
-                try { $r = Invoke-Json $uri }
-                catch {
-                    Write-Host ''
-                    # A lost query used to be one WARN among dozens of retry lines. Name
-                    # the gap so whoever reads the run can see what is missing.
-                    $what = if ($startAt -eq 0) { 'NOT COLLECTED this run' } else { "only partly collected ($startAt rows)" }
-                    Write-Log "  Microsoft query '$q' ($loc) $what : $($_.Exception.Message)" 'WARN'
-                    break
-                }
-
-                $positions = @()
-                $data = Get-JsonValue $r 'data'
-                $pos  = Get-JsonValue $data 'positions'
-                if ($pos) { $positions = @($pos) }
-                if ($positions.Count -eq 0) { break }
-                Write-Host '.' -NoNewline -ForegroundColor DarkGray
-
-                # If 'start' is being ignored we will keep receiving the same first row. Stop.
-                $thisFirst = [string](Get-JsonValue $positions[0] 'id')
-                if ($thisFirst -eq $lastFirst) {
-                    Write-Host ''
-                    Write-Log "  Microsoft '$q': paging is not advancing (start ignored) -- stopping this query" 'WARN'
-                    break
-                }
-                $lastFirst = $thisFirst
-
-                foreach ($j in $positions) {
-                    $posId = [string](Get-JsonValue $j 'id')
-                    $id = [string](Get-JsonValue $j 'atsJobId')
-                    if (-not $id) { $id = $posId }
-                    if (-not $id) { continue }
-                    if ($seen.ContainsKey($id)) { continue }
-                    $seen[$id] = $true
-
-                    $locText = ''
-                    if ($j.PSObject.Properties.Name -contains 'standardizedLocations' -and $j.standardizedLocations) {
-                        $locText = (@($j.standardizedLocations) -join '; ')
-                    } elseif ($j.PSObject.Properties.Name -contains 'locations' -and $j.locations) {
-                        $locText = (@($j.locations) -join '; ')
-                    }
-
-                    $posted = ''
-                    if ($j.PSObject.Properties.Name -contains 'postedTs' -and $j.postedTs) {
-                        $posted = ([datetimeoffset]::FromUnixTimeSeconds([int64]$j.postedTs)).ToString('yyyy-MM-dd')
-                    }
-
-                    $title = [string](Get-JsonValue $j 'name')
-                    if (-not $title) { continue }
-                    if ($j.PSObject.Properties.Name -contains 'department' -and $j.department) {
-                        $title = "$title [$($j.department)]"
-                    }
-
-                    $out += New-Posting -Source 'Microsoft' -Company 'Microsoft' -Title $title `
-                                -Location $locText -Url ("$base" + [string](Get-JsonValue $j 'positionUrl')) -ReqId $id `
-                                -Posted $posted -Content '' |
-                            Add-Member -NotePropertyName DetailPath `
-                                -NotePropertyValue "$base/api/pcsx/position_details?position_id=$posId&domain=microsoft.com&hl=en" -PassThru
-                }
-                $startAt += $positions.Count
-                $newHere += $positions.Count
-                Start-Sleep -Milliseconds $script:Throttle
-            } while ($positions.Count -gt 0 -and $newHere -lt $MaxPerQuery)
-            Write-Host " $newHere seen" -ForegroundColor DarkGray
+            $res = Get-MicrosoftQuery -Query $q -Location $loc -StartAt 0 -Seen $seen
+            $out += $res.Rows
+            if ($res.Failed) {
+                # A lost query used to be one WARN among dozens of retry lines. Name
+                # the gap so whoever reads the run can see what is missing.
+                Write-Log "  Microsoft query '$q' ($loc) stopped at $($res.Collected) rows : $($res.Error) -- queued for a retry after the other sources" 'WARN'
+                $script:MicrosoftRetry += [pscustomobject]@{
+                    Src = $Src; Query = $q; Location = $loc; StartAt = $res.Collected; Seen = $seen; FailedAt = Get-Date }
+            }
         }
     }
+    return $out
+}
+
+function Get-RetryCoolOffWait {
+    <# Seconds still to wait before the retry pass: the cool-off counts from the
+       last failure, so time spent on other sources already counts towards it. #>
+    param([int]$CoolOffSec, [datetime]$LastFailure, [datetime]$Now)
+    if (-not $PSBoundParameters.ContainsKey('Now')) { $Now = Get-Date }
+    $left = $CoolOffSec - ($Now - $LastFailure).TotalSeconds
+    if ($left -le 0) { return 0 }
+    return [int][math]::Ceiling($left)
+}
+
+function Invoke-MicrosoftRetryPass {
+    <# Reads each queued Microsoft query again from the row where it stopped,
+       after a cool-off (RetryCoolOffSec on the source, default 120 s). Each one
+       ends as recovered, or is named NOT COLLECTED / partly collected as before. #>
+    param([object[]]$Queue)
+    $Queue = @($Queue)
+    if ($Queue.Count -eq 0) { return @() }
+    $coolOff = 0
+    foreach ($item in $Queue) {
+        $c = if ($item.Src.ContainsKey('RetryCoolOffSec')) { [int]$item.Src.RetryCoolOffSec } else { 120 }
+        if ($c -gt $coolOff) { $coolOff = $c }
+    }
+    $last    = ($Queue | ForEach-Object FailedAt | Sort-Object | Select-Object -Last 1)
+    $wait    = Get-RetryCoolOffWait -CoolOffSec $coolOff -LastFailure $last
+    Write-Log "-> Microsoft : retrying $($Queue.Count) quer$(if ($Queue.Count -eq 1) { 'y' } else { 'ies' }) that did not finish (waiting $wait s first)" 'STEP'
+    if ($wait -gt 0) { Start-Sleep -Seconds $wait }
+    $out = @()
+    foreach ($item in $Queue) {
+        $script:Throttle = if ($item.Src.ContainsKey('ThrottleMs')) { [int]$item.Src.ThrottleMs } else { $PolitenessMs }
+        $res = Get-MicrosoftQuery -Query $item.Query -Location $item.Location -StartAt $item.StartAt -Seen $item.Seen
+        $out += $res.Rows
+        if ($res.Failed) {
+            Write-Log "  Microsoft query '$($item.Query)' ($($item.Location)) $(Get-MicrosoftGapText $res.Collected) after the retry : $($res.Error)" 'WARN'
+        } else {
+            Write-Log "  Microsoft query '$($item.Query)' ($($item.Location)) recovered on retry: $($res.Collected) rows" 'OK'
+        }
+    }
+    Write-Log "   $($out.Count) more postings from the retry"
     return $out
 }
 
@@ -2338,6 +2433,11 @@ foreach ($src in $sources) {
         Write-Log "   FAILED $($src.Company): $($_.Exception.Message)" 'ERROR'
     }
     Start-Sleep -Milliseconds $script:Throttle
+}
+
+if (@($script:MicrosoftRetry).Count -gt 0) {
+    try { $all += @(Invoke-MicrosoftRetryPass $script:MicrosoftRetry) }
+    catch { Write-Log "   Microsoft retry pass FAILED: $($_.Exception.Message)" 'ERROR' }
 }
 
 if ($all.Count -eq 0) { Write-Log 'No postings retrieved. Nothing to do.' 'WARN'; Complete-Run; exit $script:ExitCode }

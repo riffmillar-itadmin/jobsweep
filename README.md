@@ -39,7 +39,7 @@ That is what the test suite is for.
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs and company names into `Sources` entries you can paste. See [Finding new sources](#finding-new-sources). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 454 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 476 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -248,16 +248,16 @@ summary still prints.
 ##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 908  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
-Run:     2026-11-13 18:00
+Run:     2026-11-16 16:30
 PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  454    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  454    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  476    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  476    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 908  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 952  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -296,6 +296,20 @@ decide what ships.
 
 ## Changelog
 
+- **1.8.1** (2026-11-16): fixes from the 11 and 16 Nov sweep logs.
+  - A Microsoft query that runs out of 429 retries is no longer lost. It is
+    queued, and after every other source has run it is read again from the
+    row where it stopped. The retry waits until `RetryCoolOffSec` (default
+    120 s, set on the Microsoft source) has passed since the last failure.
+    Each queued query ends as `recovered on retry`, or is named
+    `NOT COLLECTED this run` or `only partly collected` as before.
+  - On PowerShell 7.4 and later, `-TimeoutSec` limits only the connection, so
+    a response body that stopped arriving could hold the run indefinitely. One
+    Workday board took 107 minutes this way. Requests in the collector and the
+    scout now also set `-OperationTimeoutSeconds`. Windows PowerShell 5.1 is
+    unchanged, because its `-TimeoutSec` already covers the whole request.
+  - 22 new regression cases (476). The Microsoft loop and the retry pass are
+    tested against a fake API that throttles a page on demand.
 - **1.8.0** (2026-11-13): a Paylocity provider, and one summary style for
   every test run.
   - Paylocity's documented job feed needs a key each employer keeps private,
