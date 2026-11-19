@@ -140,6 +140,11 @@
     1.8.2 (2026-11-16): the 1.8.1 code, released under a new number. The first
     v1.8.1 tag was pushed on the wrong commit, and immutable releases reserve a
     deleted release's tag name, so 1.8.1 has no release. No code changes.
+    1.8.3 (2026-11-18): Microsoft "Technical Support Engineer" titles in the
+    [Technical Support Engineering] discipline are excluded (customer support).
+    A Microsoft query that gives up but is queued for the retry pass logs a WARN,
+    not an ERROR, and the retry pass ends with one "Microsoft complete" or
+    "Microsoft INCOMPLETE" line. -NoTypeInformation is passed only on 5.1.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -172,7 +177,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.8.2'
+$JobSweepVersion = '1.8.3'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -186,6 +191,7 @@ $script:ExitCode    = 0
 $script:Throttle    = $PolitenessMs   # per-provider override, set in the source loop
 $script:DayforceSessions = @{}         # namespace -> session and CSRF header, see Get-DayforceSession
 $script:MicrosoftRetry   = @()          # queries that ran out of retries, see Invoke-MicrosoftRetryPass
+$script:RetryLater       = $false       # true while a give-up will be retried later in the run, see Get-GiveUpLevel
 $script:WebTimeout       = $null        # set once Get-WebTimeoutParameter is defined, see HELPERS
 
 # ============================================================================
@@ -528,6 +534,17 @@ function Get-HttpFailure {
     return $result
 }
 
+function Get-GiveUpLevel {
+    <# How a request that ran out of retries is logged. A Microsoft query that
+       gives up in the first pass is queued and read again at the end of the run,
+       so its give-up is a WARN. It is an ERROR only when nothing will retry it.
+       Before 1.8.3 every give-up was an ERROR, so a run whose retry pass
+       recovered everything still reported errors and read as incomplete. #>
+    param([bool]$RetryLater)
+    if ($RetryLater) { return 'WARN' }
+    return 'ERROR'
+}
+
 function Invoke-WithRetry {
     <# Retries 429 / 408 / 5xx and bare network faults with exponential backoff,
        honouring Retry-After when the server sends one. Anything else rethrows. #>
@@ -546,7 +563,8 @@ function Invoke-WithRetry {
                           ($f.Status -ge 500 -and $f.Status -le 599))
             if (-not $transient -or $attempt -ge $MaxAttempts) {
                 if ($f.Status -eq 429) {
-                    Write-Log "$Label : rate limited (429) and out of retries after $attempt attempts" 'ERROR'
+                    $later = if ($script:RetryLater) { ' -- will be retried later in the run' } else { '' }
+                    Write-Log "$Label : rate limited (429) and out of retries after $attempt attempts$later" (Get-GiveUpLevel $script:RetryLater)
                 }
                 throw
             }
@@ -1783,19 +1801,22 @@ function Get-MicrosoftJobs {
     param($Src)
     $out  = @()
     $seen = @{}
-    foreach ($q in $Src.Queries) {
-        foreach ($loc in $Src.Locations) {
-            $res = Get-MicrosoftQuery -Query $q -Location $loc -StartAt 0 -Seen $seen
-            $out += $res.Rows
-            if ($res.Failed) {
-                # A lost query used to be one WARN among dozens of retry lines. Name
-                # the gap so whoever reads the run can see what is missing.
-                Write-Log "  Microsoft query '$q' ($loc) stopped at $($res.Collected) rows : $($res.Error) -- queued for a retry after the other sources" 'WARN'
-                $script:MicrosoftRetry += [pscustomobject]@{
-                    Src = $Src; Query = $q; Location = $loc; StartAt = $res.Collected; Seen = $seen; FailedAt = Get-Date }
+    $script:RetryLater = $true   # a give-up here is queued, not lost (Get-GiveUpLevel)
+    try {
+        foreach ($q in $Src.Queries) {
+            foreach ($loc in $Src.Locations) {
+                $res = Get-MicrosoftQuery -Query $q -Location $loc -StartAt 0 -Seen $seen
+                $out += $res.Rows
+                if ($res.Failed) {
+                    # A lost query used to be one WARN among dozens of retry lines. Name
+                    # the gap so whoever reads the run can see what is missing.
+                    Write-Log "  Microsoft query '$q' ($loc) stopped at $($res.Collected) rows : $($res.Error) -- queued for a retry after the other sources" 'WARN'
+                    $script:MicrosoftRetry += [pscustomobject]@{
+                        Src = $Src; Query = $q; Location = $loc; StartAt = $res.Collected; Seen = $seen; FailedAt = Get-Date }
+                }
             }
         }
-    }
+    } finally { $script:RetryLater = $false }
     return $out
 }
 
@@ -1825,18 +1846,26 @@ function Invoke-MicrosoftRetryPass {
     $wait    = Get-RetryCoolOffWait -CoolOffSec $coolOff -LastFailure $last
     Write-Log "-> Microsoft : retrying $($Queue.Count) quer$(if ($Queue.Count -eq 1) { 'y' } else { 'ies' }) that did not finish (waiting $wait s first)" 'STEP'
     if ($wait -gt 0) { Start-Sleep -Seconds $wait }
-    $out = @()
+    $out  = @()
+    $lost = 0
     foreach ($item in $Queue) {
         $script:Throttle = if ($item.Src.ContainsKey('ThrottleMs')) { [int]$item.Src.ThrottleMs } else { $PolitenessMs }
         $res = Get-MicrosoftQuery -Query $item.Query -Location $item.Location -StartAt $item.StartAt -Seen $item.Seen
         $out += $res.Rows
         if ($res.Failed) {
             Write-Log "  Microsoft query '$($item.Query)' ($($item.Location)) $(Get-MicrosoftGapText $res.Collected) after the retry : $($res.Error)" 'WARN'
+            $lost++
         } else {
             Write-Log "  Microsoft query '$($item.Query)' ($($item.Location)) recovered on retry: $($res.Collected) rows" 'OK'
         }
     }
     Write-Log "   $($out.Count) more postings from the retry"
+    # One line that says whether Microsoft ended complete, for whoever reads the log.
+    if ($lost -eq 0) {
+        Write-Log "   Microsoft complete: all $($Queue.Count) queued quer$(if ($Queue.Count -eq 1) { 'y' } else { 'ies' }) recovered on retry" 'OK'
+    } else {
+        Write-Log "   Microsoft INCOMPLETE: $lost of $($Queue.Count) queued quer$(if ($Queue.Count -eq 1) { 'y' } else { 'ies' }) still missing after the retry" 'WARN'
+    }
     return $out
 }
 
@@ -2579,14 +2608,18 @@ $candJson= Join-Path $sweepDir "sweep-$stamp-candidates.json"
 $outCsv  = Join-Path $sweepDir "sweep-$stamp-screened.csv"
 
 $summaryCols = 'Company','Title','Location','Remote','Pay','Degree','NeedsLicence','Posted','ReqId','Source','Url'
+# Windows PowerShell 5.1 writes a #TYPE line unless told not to. PowerShell 6+ never
+# does, and 7.7 warns on every run that -NoTypeInformation is obsolete.
+$csvArgs = @{ Encoding = 'UTF8' }
+if ($PSVersionTable.PSVersion.Major -lt 6) { $csvArgs['NoTypeInformation'] = $true }
 
 if ($candidates.Count -gt 0) {
-    $candidates | Select-Object $summaryCols | Export-Csv -Path $candCsv -NoTypeInformation -Encoding UTF8
+    $candidates | Select-Object $summaryCols | Export-Csv -Path $candCsv @csvArgs
     $candidates | Select-Object ($summaryCols + 'Reason','Content') | ConvertTo-Json -Depth 4 |
         Out-File -FilePath $candJson -Encoding UTF8
 }
 if ($screened.Count -gt 0) {
-    $screened | Select-Object ($summaryCols + 'Reason') | Export-Csv -Path $outCsv -NoTypeInformation -Encoding UTF8
+    $screened | Select-Object ($summaryCols + 'Reason') | Export-Csv -Path $outCsv @csvArgs
 }
 
 Write-Host ''

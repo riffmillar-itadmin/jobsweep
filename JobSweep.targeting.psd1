@@ -124,7 +124,14 @@ TitleExclude = @(
     # so it is a decline twice over and belongs at the cheap title-level screen
     # rather than after a detail fetch. Scoped to the ENGINEERING senses only --
     # 'hardware asset management' is in TitleProtect and is a target title.
-    'hardware engineer','hardware systems engineer','hardware design','firmware engineer'
+    'hardware engineer','hardware systems engineer','hardware design','firmware engineer',
+    # CUSTOMER SUPPORT, added 2026-11-18 (1.8.3). Microsoft's "Technical Support
+    # Engineer" posts in the [Technical Support Engineering] discipline are its
+    # Customer Service & Support organisation: solving customers' technical
+    # issues, a customer-facing lane. Three reached the candidate list on
+    # 'support engineer' in one run. Scoped to that title in that discipline:
+    # the same discipline tag also carries data analyst and media systems posts.
+    'technical support engineer.*\[technical support engineering\]'
 )
 
 # ---- LOCATION, restructured 2026-09-10 when national remote came back in scope.

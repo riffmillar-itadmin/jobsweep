@@ -39,7 +39,7 @@ That is what the test suite is for.
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs and company names into `Sources` entries you can paste. See [Finding new sources](#finding-new-sources). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 476 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 487 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -245,19 +245,19 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 908  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 974  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
-Run:     2026-11-16 16:30
+Run:     2026-11-18 17:30
 PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  476    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  476    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  487    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  487    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 952  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 974  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -296,6 +296,24 @@ decide what ships.
 
 ## Changelog
 
+- **1.8.3** (2026-11-18): fixes from the first week of 1.8.2 runs.
+  - Microsoft's "Technical Support Engineer" posts in the
+    `[Technical Support Engineering]` discipline are its customer support
+    organisation, so they are now excluded. Three had reached the candidate list on
+    `support engineer` in one run. The rule is scoped to that title in that
+    discipline. The same discipline tag also carries other kinds of post, and
+    "Technical Support Engineer" at other employers is still a target.
+  - A Microsoft query that runs out of retries in the first pass is queued
+    for the retry pass, so its give-up is now logged as a warning. An error
+    is logged only when the retry fails too. Before this, a run whose retry
+    pass recovered every query still reported errors and read as incomplete.
+    The retry pass now ends with one line, `Microsoft complete` or
+    `Microsoft INCOMPLETE`.
+  - `-NoTypeInformation` is passed to `Export-Csv` only on Windows
+    PowerShell 5.1. PowerShell 7.7 warned on every run that it is obsolete,
+    and 6+ never writes the type line anyway.
+  - 11 new regression cases (487). The README test-banner example now shows
+    the right totals; it still said 908 after 1.8.1.
 - **1.8.2** (2026-11-16): the 1.8.1 code under a new release number. The
   first `v1.8.1` tag was pushed on the wrong commit and deleted, and with
   immutable releases a deleted release's tag name can't be reused, so 1.8.1
