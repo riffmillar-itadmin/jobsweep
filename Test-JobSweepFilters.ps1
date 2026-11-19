@@ -279,6 +279,18 @@ Check 'DC Sales Exec DROPS'           (Test-TitleMatch 'Data Center Account Exec
 # physical grounds now, so the keyword had nothing left to justify it.
 Check 'Datacenter Eng no longer kept'  (Test-TitleMatch 'Datacenter Engineer').Ok                            $false
 
+Write-Host "`n-- TITLE: well-being and wellness support roles, added 2026-11-19 (1.8.4) --"
+# A hospital's "Well-being Support Specialist" reached the candidate list on
+# 'support specialist' on 2026-11-18. It is a patient and staff support role.
+Check 'Well-being Support Spec DROPS'  (Test-TitleMatch 'Well-being Support Specialist - Harborview Medical Center').Ok $false
+Check 'Wellbeing (no hyphen) DROPS'    (Test-TitleMatch 'Wellbeing Support Specialist').Ok                    $false
+Check 'Well being (space) DROPS'       (Test-TitleMatch 'Employee Well Being Support Analyst').Ok              $false
+Check 'Wellness Support Spec DROPS'    (Test-TitleMatch 'Wellness Program Support Specialist').Ok              $false
+Check 'Well-being drop names the rule' ((Test-TitleMatch 'Well-being Support Specialist').Reason -like '*well*being*') $true
+# The plain target title is untouched.
+Check 'IT Support Specialist still KEPT' (Test-TitleMatch 'IT Support Specialist II').Ok                       $true
+Check 'Desktop Support Spec still KEPT'  (Test-TitleMatch 'Desktop Support Specialist').Ok                     $true
+
 Write-Host "`n-- TITLE: Microsoft customer support engineers, added 2026-11-18 (1.8.3) --"
 # Three of these reached the candidate list on 'support engineer' on 2026-11-18.
 # They are Microsoft's Customer Service & Support organisation: customer-facing.
