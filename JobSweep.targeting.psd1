@@ -104,6 +104,10 @@ TitleExclude = @(
     'therapist','mental health','counselor','counsellor','social worker',
     'peer support','psychiatr','chaplain','pharmac','radiolog','sonograph',
     'respiratory','physician','surgical','caregiver','medical assistant',
+    # Added 2026-11-19 (1.8.4). A hospital's "Well-being Support Specialist" reached
+    # the candidate list on 'support specialist'. Well-being and wellness titles in
+    # past sweeps were patient care, staff wellness or benefits, never IT.
+    'well[- ]?being','wellness',
     # Defense operations research -- Bluehawk's three ORSA reqs matched
     # 'systems analyst' and are a different profession entirely.
     'operations research',
