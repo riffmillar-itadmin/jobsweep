@@ -122,7 +122,7 @@ $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteT
           'Get-PaylocityPageData','ConvertFrom-PaylocityJob','ConvertFrom-PaylocityDetail',
           'Get-PaylocityJobs','Add-PaylocityDetail',
           'Get-MicrosoftQuery','Get-MicrosoftGapText','Get-MicrosoftJobs','Get-RetryCoolOffWait',
-          'Invoke-MicrosoftRetryPass','Get-WebTimeoutParameter')
+          'Invoke-MicrosoftRetryPass','Get-WebTimeoutParameter','Get-GiveUpLevel')
 $parts = @()
 
 $assign = @($ast.FindAll({ param($n)
@@ -278,6 +278,17 @@ Check 'DC Sales Exec DROPS'           (Test-TitleMatch 'Data Center Account Exec
 # 'data\s?cent' was removed again on 2026-09-24 -- datacenter-floor roles are gated on
 # physical grounds now, so the keyword had nothing left to justify it.
 Check 'Datacenter Eng no longer kept'  (Test-TitleMatch 'Datacenter Engineer').Ok                            $false
+
+Write-Host "`n-- TITLE: Microsoft customer support engineers, added 2026-11-18 (1.8.3) --"
+# Three of these reached the candidate list on 'support engineer' on 2026-11-18.
+# They are Microsoft's Customer Service & Support organisation: customer-facing.
+Check 'MS Technical Support Eng DROPS'    (Test-TitleMatch 'Technical Support Engineer [Technical Support Engineering]').Ok        $false
+Check 'MS Sr Technical Support Eng DROPS' (Test-TitleMatch 'Senior Technical Support Engineer [Technical Support Engineering]').Ok $false
+Check 'MS TSE drop names the rule'        ((Test-TitleMatch 'Technical Support Engineer [Technical Support Engineering]').Reason -like '*technical support engineer*') $true
+# Scoped to that title in that discipline. Elsewhere the title is still a target.
+Check 'Technical Support Eng elsewhere KEPT' (Test-TitleMatch 'Technical Support Engineer II').Ok                               $true
+Check 'MS Platform Service Eng still KEPT'   (Test-TitleMatch 'Platform Service Engineer [Service Engineering]').Ok             $true
+Check 'IT support engineer still KEPT'       (Test-TitleMatch 'IT Support Engineer').Ok                                         $true
 
 Write-Host "`n-- TITLE: the seven 'it ' patterns are word-anchored, added 2026-10-06 --"
 # Found when a bank's "Senior Credit Analyst - CRE" reached the candidate list with
@@ -1026,6 +1037,7 @@ Check 'Retry pass: resumes at start=10'           ($script:msCalls[0] -like '*qu
 Check 'Retry pass: recovers the missing rows'     (($msR | ForEach-Object ReqId | Sort-Object { [int]($_ -split '-')[1] }) -join ',') ((10..29 | ForEach-Object { "systems-$_" }) -join ',')
 Check 'Retry pass: no row repeated'               (@($ms + $msR | ForEach-Object ReqId | Sort-Object -Unique).Count) 60
 Check 'Retry pass: recovery logged as OK'         (@($script:testLog | Where-Object { $_.StartsWith('[OK]') -and $_ -like "*'systems' (Westmark) recovered on retry: 30 rows*" }).Count) 1
+Check 'Retry pass: all recovered ends complete'   (@($script:testLog | Where-Object { $_.StartsWith('[OK]') -and $_ -like '*Microsoft complete: all 1 queued query recovered on retry*' }).Count) 1
 Check 'Retry pass: cool-off from the profile'    (@($script:testLog | Where-Object { $_ -match "retrying 1 query that did not finish \(waiting [01] s first\)" }).Count) 1
 
 # Still failing on the retry: named the way a lost query always was.
@@ -1036,7 +1048,13 @@ $msR2 = @(Invoke-MicrosoftRetryPass $script:MicrosoftRetry)
 Check 'Retry pass: nothing gained is no rows'     $msR2.Count 0
 Check 'Retry pass: still lost is NOT COLLECTED'   (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like "*'endpoint' (Westmark) NOT COLLECTED this run after the retry*" }).Count) 1
 Check 'Retry pass: empty queue does nothing'      @(Invoke-MicrosoftRetryPass @()).Count 0
+# 1.8.3: one closing line says whether Microsoft ended complete.
+Check 'Retry pass: lost query ends INCOMPLETE'    (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like '*Microsoft INCOMPLETE: 1 of 1 queued query still missing*' }).Count) 1
+Check 'Get-MicrosoftJobs: RetryLater reset after' $script:RetryLater $false
 
+# 1.8.3: a give-up that will be retried is a WARN; an ERROR only when nothing will.
+Check 'give-up queued for retry is WARN'          (Get-GiveUpLevel -RetryLater $true) 'WARN'
+Check 'give-up with no retry is ERROR'            (Get-GiveUpLevel -RetryLater $false) 'ERROR'
 Check 'gap text: none read'                       (Get-MicrosoftGapText 0) 'NOT COLLECTED this run'
 Check 'gap text: some read'                       (Get-MicrosoftGapText 40) 'only partly collected (40 rows)'
 $t0 = [datetime]::new(2026, 11, 16, 13, 20, 43)
