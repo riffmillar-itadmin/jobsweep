@@ -1718,6 +1718,17 @@ if ((Test-Path -LiteralPath $scoutPath) -and (Get-Command Get-EmployerNameKey -E
     Check 'namesake: other city refused' (Test-PageNamesEmployer $elsewhere 'Example Clinic' 'Harborview') $false
     Check 'namesake: other name refused' (Test-PageNamesEmployer $home1 'Lakeside Dental Group' 'Harborview') $false
     Check 'namesake: no city given'     (Test-PageNamesEmployer $elsewhere 'Example Clinic' '') $true
+    # Added 2026-11-20 (1.12.2): a two-word name guessed one generic word
+    # ("Harborview Medical Center" -> medical.com) and, with no city to check,
+    # half the words in the title was enough.
+    $g2 = @(Get-DomainGuess 'Harborview Medical Center')
+    Check 'guess: never one generic word'  (@($g2 | Where-Object { $_ -match '//www\.medical\.' }).Count) 0
+    Check 'guess: two-word name keeps both' $g2[0] 'https://www.harborviewmedicalcenter.org/'
+    Check 'guess: college not guessed'     (@(Get-DomainGuess 'Harborview College' | Where-Object { $_ -match '//www\.college\.' }).Count) 0
+    Check 'guess: one-word name still guessed' (@(Get-DomainGuess 'Examplecorp')[0]) 'https://www.examplecorp.org/'
+    $generic = '<html><head><title>Medical Supplies and Equipment</title></head><body>Shop now</body></html>'
+    Check 'namesake: no city, half words refused' (Test-PageNamesEmployer $generic 'Harborview Medical Center' '') $false
+    Check 'namesake: no city, all words kept' (Test-PageNamesEmployer '<title>Harborview Medical | Home</title>' 'Harborview Medical Center' '') $true
 
     Check 'browser: script shell'       (Test-PageNeedsBrowser '<div id="root"></div><noscript>Please enable JavaScript</noscript>' 1) $true
     Check 'browser: ordinary page'      (Test-PageNeedsBrowser $home1 4) $false
