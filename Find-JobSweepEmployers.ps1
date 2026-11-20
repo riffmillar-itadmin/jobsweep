@@ -21,10 +21,13 @@
             Size: assets.
       Local Your own CSV files (Discovery.ExtraCsv), for employers no dataset
             covers. Columns: company, website, industry, city, zip, and
-            optionally size_measure, size_value, notes.
+            optionally size_measure, size_value, notes, source_dataset
+            (kept when set, for example 'manual') and in_zone (true or false;
+            when set it wins over the ZIP and city).
 
-    The zone, the state, the size thresholds and the NameExclude patterns live
-    in the Discovery block of your local profile, never in this script. Every request is checked against
+    The zone, the state, the size thresholds and the NameExclude and
+    IndustryExclude patterns live in the Discovery block of your local
+    profile, never in this script. Every request is checked against
     the site's robots.txt first; a disallowed path is reported as
     "blocked by robots" and not fetched. Requests are spaced by -ThrottleMs and
     carry a descriptive User-Agent.
@@ -100,6 +103,7 @@ function Get-DiscoverySetting {
         NteeExclude          = @(& $get 'NteeExclude' @())
         IrsSubsections       = @(& $get 'IrsSubsections' @())
         NameExclude          = @(& $get 'NameExclude' @() | Where-Object { $_ })
+        IndustryExclude      = @(& $get 'IndustryExclude' @() | Where-Object { $_ })
         Datasets             = @(& $get 'Datasets' @('IRS', 'NCUA', 'FDIC', 'Local'))
         ExtraCsv             = @(& $get 'ExtraCsv' @())
     }
@@ -119,6 +123,17 @@ function ConvertTo-NameCase {
     $n = ([string]$Name).Trim() -replace '\s+', ' '
     if ($n -cmatch '[a-z]') { return $n }
     return (Get-Culture).TextInfo.ToTitleCase($n.ToLower())
+}
+
+function Resolve-EmployerInZone {
+    <# A row's in_zone: an in_zone value given in your own CSV (true/false,
+       yes/no, 1/0) wins; otherwise the ZIP and city decide. For rows you have
+       already checked against your zone, or that come with no address. #>
+    param($Row, [hashtable]$Setting)
+    $given = ([string]$Row.in_zone).Trim()
+    if ($given -match '^(?i)(true|yes|y|1)$') { return $true }
+    if ($given -match '^(?i)(false|no|n|0)$') { return $false }
+    return [bool](Test-EmployerInZone $Row.zip $Row.city $Setting)
 }
 
 function Test-EmployerInZone {
@@ -167,11 +182,11 @@ function Get-NteeIndustry {
     if (-not $c) { return 'nonprofit (unclassified)' }
     $map = @{
         A = 'arts and culture'; B = 'education'; C = 'environment'; D = 'animal welfare'
-        E = 'health care'; F = 'mental health'; G = 'health (disease and disorders)'; H = 'medical research'
+        E = 'health care'; F = 'mental health'; G = 'health (disease and disorders)'; H = 'research institute (medical)'
         I = 'crime and legal'; J = 'employment'; K = 'food and agriculture'; L = 'housing'
         M = 'public safety'; N = 'recreation and sports'; O = 'youth development'; P = 'human services'
         Q = 'international'; R = 'civil rights'; S = 'community improvement'; T = 'philanthropy'
-        U = 'science and technology'; V = 'social science'; W = 'public and societal benefit'; X = 'religion'
+        U = 'research institute (science and technology)'; V = 'social science'; W = 'public and societal benefit'; X = 'religion'
         Y = 'mutual and membership benefit'; Z = 'unknown'
     }
     $k = $c.Substring(0, 1)
@@ -196,17 +211,30 @@ function Get-EmployerNameExclusion {
     return ''
 }
 
+function Get-EmployerIndustryExclusion {
+    <# The first IndustryExclude pattern that matches the industry, or ''. For
+       kinds of employer you never want, whichever dataset names them: an
+       employers CSV that lists a consultancy or an aerospace firm, for example.
+       Patterns are regular expressions, matched without regard to case. #>
+    param([string]$Industry, $Setting)
+    if (-not $Industry) { return '' }
+    foreach ($p in @($Setting.IndustryExclude)) {
+        if ($p -and $Industry -match "(?i)$p") { return [string]$p }
+    }
+    return ''
+}
+
 function New-EmployerRow {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '',
         Justification = 'Builds a row object in memory; it changes no system state.')]
     param([string]$Company, [string]$Website, [string]$Industry, [string]$Dataset, [string]$SourceId,
-          [string]$City, [string]$Zip, [string]$SizeMeasure, $SizeValue, [string]$Notes)
+          [string]$City, [string]$Zip, [string]$SizeMeasure, $SizeValue, [string]$Notes, [string]$InZone = '')
     [pscustomobject][ordered]@{
         company = $Company; website = $Website; industry = $Industry
         source_dataset = $Dataset; source_id = $SourceId
         city = $City; zip = (ConvertTo-ZipFive $Zip)
         size_measure = $SizeMeasure; size_value = $SizeValue
-        in_zone = $false; already_in_profile = ''; notes = $Notes
+        in_zone = $InZone; already_in_profile = ''; notes = $Notes
     }
 }
 
@@ -296,7 +324,10 @@ function ConvertFrom-FdicInstitution {
 }
 
 function ConvertFrom-LocalEmployerCsv {
-    <# Your own list. company is required; the rest are optional. #>
+    <# Your own list. company is required; the rest are optional. A non-blank
+       source_dataset column is kept (for example 'manual'); otherwise the
+       dataset is 'local: <file name>'. A non-blank in_zone column (true or
+       false) is kept and wins over the ZIP and city. #>
     param([string]$Text, [string]$Name)
     $rows = @($Text | ConvertFrom-Csv)
     if ($rows.Count -eq 0) { return @() }
@@ -307,9 +338,12 @@ function ConvertFrom-LocalEmployerCsv {
         $c = & $v $r 'company'
         if (-not $c) { continue }
         $sv = & $v $r 'size_value'
-        New-EmployerRow -Company $c -Website (& $v $r 'website') -Industry (& $v $r 'industry') -Dataset "local: $Name" `
+        $ds = & $v $r 'source_dataset'
+        if (-not $ds) { $ds = "local: $Name" }
+        $iz = & $v $r 'in_zone'
+        New-EmployerRow -Company $c -Website (& $v $r 'website') -Industry (& $v $r 'industry') -Dataset $ds `
             -SourceId '' -City (& $v $r 'city') -Zip (& $v $r 'zip') -SizeMeasure (& $v $r 'size_measure') `
-            -SizeValue $(if ($sv -match '^\d+$') { [long]$sv } else { $sv }) -Notes (& $v $r 'notes')
+            -SizeValue $(if ($sv -match '^\d+$') { [long]$sv } else { $sv }) -Notes (& $v $r 'notes') -InZone $iz
     }
     return @($out)
 }
@@ -327,6 +361,7 @@ function Merge-EmployerRow {
         $other = $r
         if (($r.size_value -as [long]) -gt ($keep.size_value -as [long])) { $keep = $r; $other = $byKey[$k] }
         if (-not $keep.website -and $other.website) { $keep.website = $other.website }
+        if (-not ([string]$keep.in_zone).Trim() -and ([string]$other.in_zone).Trim()) { $keep.in_zone = $other.in_zone }
         $also = "also in $($other.source_dataset) $($other.source_id)".Trim()
         $keep.notes = (@($keep.notes, $also) | Where-Object { $_ }) -join '; '
         $byKey[$k] = $keep
@@ -436,8 +471,10 @@ if (-not $ProfilePath) {
 }
 $Config = Merge-JobSweepProfile -Defaults $Config -ProfilePath $ProfilePath
 $set = Get-DiscoverySetting $Config
-foreach ($p in @($set.NameExclude)) {
-    try { $null = [regex]::new([string]$p) } catch { throw "Discovery.NameExclude: '$p' is not a valid regular expression: $($_.Exception.Message)" }
+foreach ($k in @('NameExclude', 'IndustryExclude')) {
+    foreach ($p in @($set[$k])) {
+        try { $null = [regex]::new([string]$p) } catch { throw "Discovery.$k`: '$p' is not a valid regular expression: $($_.Exception.Message)" }
+    }
 }
 if (-not $OutputRoot) {
     $OutputRoot = if ($Config.ContainsKey('OutputRoot') -and $Config.OutputRoot) {
@@ -515,15 +552,18 @@ foreach ($ds in @('IRS', 'NCUA', 'FDIC', 'Local')) {
 
 $all = @(Merge-EmployerRow $all)
 $nameDropped = 0
+$industryDropped = 0
 $kept = @()
 foreach ($r in $all) {
     $hit = Get-EmployerNameExclusion $r.company $set
     if ($hit) { $nameDropped++; Write-Host ("  name excluded: {0}  ({1})" -f $r.company, $hit) -ForegroundColor DarkGray; continue }
+    $hit = Get-EmployerIndustryExclusion $r.industry $set
+    if ($hit) { $industryDropped++; Write-Host ("  industry excluded: {0}, {1}  ({2})" -f $r.company, $r.industry, $hit) -ForegroundColor DarkGray; continue }
     $kept += $r
 }
 $all = @($kept)
 foreach ($r in $all) {
-    $r.in_zone = [bool](Test-EmployerInZone $r.zip $r.city $set)
+    $r.in_zone = Resolve-EmployerInZone $r $set
     $r.already_in_profile = Test-EmployerInProfile $r.company $profileKeys
 }
 $inZone = @($all | Where-Object { $_.in_zone })
@@ -536,7 +576,7 @@ $write | Export-Csv -LiteralPath $OutFile @csvArgs
 Write-Host ("`nWrote {0} rows to {1}" -f $write.Count, $OutFile)
 
 $inProfile = @($inZone | Where-Object { $_.already_in_profile }).Count
-$summary.Add([pscustomobject]@{ Dataset = 'All (merged)'; Status = 'INFO'; AboveSize = $all.Count; Note = ("{0} in zone, {1} of those already in profile, {2} new; {3} dropped by NameExclude" -f $inZone.Count, $inProfile, ($inZone.Count - $inProfile), $nameDropped) })
+$summary.Add([pscustomobject]@{ Dataset = 'All (merged)'; Status = 'INFO'; AboveSize = $all.Count; Note = ("{0} in zone, {1} of those already in profile, {2} new; {3} dropped by NameExclude, {4} by IndustryExclude" -f $inZone.Count, $inProfile, ($inZone.Count - $inProfile), $nameDropped, $industryDropped) })
 
 $sPass = @($summary | Where-Object Status -eq 'PASS').Count
 $sFail = @($summary | Where-Object Status -eq 'FAIL').Count

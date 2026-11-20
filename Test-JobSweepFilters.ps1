@@ -1492,7 +1492,8 @@ if (Test-Path -LiteralPath $discPath) {
     $discWant = @('Get-DiscoverySetting', 'ConvertTo-ZipFive', 'ConvertTo-NameCase', 'Test-EmployerInZone', 'Get-EmployerNameKey',
                   'Test-EmployerInProfile', 'Get-NteeIndustry', 'Assert-DatasetColumn', 'New-EmployerRow', 'ConvertFrom-IrsEoCsv',
                   'ConvertFrom-NcuaCallReport', 'Get-NcuaNewestZip', 'ConvertFrom-FdicInstitution', 'ConvertFrom-LocalEmployerCsv',
-                  'Merge-EmployerRow', 'Test-RobotsAllowed', 'Get-EmployerNameExclusion')
+                  'Merge-EmployerRow', 'Test-RobotsAllowed', 'Get-EmployerNameExclusion',
+                  'Get-EmployerIndustryExclusion', 'Resolve-EmployerInZone')
     $dFns = @($dAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $discWant -contains $n.Name }, $true))
     Check 'discovery helpers all found' $dFns.Count $discWant.Count
     . ([scriptblock]::Create((@($dFns | ForEach-Object { $_.Extent.Text }) -join "`n`n")))
@@ -1512,6 +1513,17 @@ if (Test-Path -LiteralPath $discPath) {
     Check 'name exclude: suffix pattern'      (Get-EmployerNameExclusion 'Example Hospital Foundation' $nxSet) 'hospital foundation$'
     Check 'name exclude: parent kept'         (Get-EmployerNameExclusion 'Example Hospital' $nxSet) ''
     Check 'name exclude: none set'            (Get-EmployerNameExclusion 'Example Hospital Foundation' $dSet) ''
+    # IndustryExclude, added 2026-11-20 (1.12.0): kinds of employer to drop from any dataset.
+    $ixSet = Get-DiscoverySetting @{ Discovery = @{ IndustryExclude = @('consult', '\bmsp\b|managed (it )?services', 'aerospace', '') } }
+    Check 'setting: IndustryExclude default empty' (@((Get-DiscoverySetting @{}).IndustryExclude).Count) 0
+    Check 'setting: IndustryExclude blank dropped' (@($ixSet.IndustryExclude).Count) 3
+    Check 'industry exclude: consultancy'     (Get-EmployerIndustryExclusion 'IT Consulting' $ixSet) 'consult'
+    Check 'industry exclude: MSP'             (Get-EmployerIndustryExclusion 'MSP' $ixSet) '\bmsp\b|managed (it )?services'
+    Check 'industry exclude: managed services' (Get-EmployerIndustryExclusion 'Managed IT Services' $ixSet) '\bmsp\b|managed (it )?services'
+    Check 'industry exclude: aerospace'       (Get-EmployerIndustryExclusion 'Aerospace and Defense' $ixSet) 'aerospace'
+    Check 'industry exclude: data centre kept' (Get-EmployerIndustryExclusion 'data centre' $ixSet) ''
+    Check 'industry exclude: blank kept'      (Get-EmployerIndustryExclusion '' $ixSet) ''
+    Check 'industry exclude: none set'        (Get-EmployerIndustryExclusion 'IT Consulting' $dSet) ''
     $exNx = @()
     try {
         $exProf = Import-PowerShellDataFile -LiteralPath (Join-Path (Split-Path -Parent $SweepScript) 'JobSweep.local.example.psd1')
@@ -1541,6 +1553,8 @@ if (Test-Path -LiteralPath $discPath) {
     Check 'profile: no partial word'         (Test-EmployerInProfile 'Example Healthcare Partners' $pk) ''
 
     Check 'NTEE: health care'                (Get-NteeIndustry 'E220') 'health care'
+    Check 'NTEE: H is a research institute'  (Get-NteeIndustry 'H120') 'research institute (medical)'
+    Check 'NTEE: U is a research institute'  (Get-NteeIndustry 'U20') 'research institute (science and technology)'
     Check 'NTEE: blank'                      (Get-NteeIndustry '') 'nonprofit (unclassified)'
 
     $irs = @'
@@ -1599,6 +1613,20 @@ if (Test-Path -LiteralPath $discPath) {
     $loc = @(ConvertFrom-LocalEmployerCsv "company,website,city,zip`nHarborview Port Authority,,Harborview,00012`n,,,`n" 'gov.csv')
     Check 'local CSV: blank company skipped' $loc.Count 1
     Check 'local CSV: dataset names file'    $loc[0].source_dataset 'local: gov.csv'
+    $man = @(ConvertFrom-LocalEmployerCsv "company,industry,source_dataset`nExample Data Centre,data centre,manual`nExample Studio,gaming studio,`n" 'employers-manual.csv')
+    Check 'local CSV: source_dataset kept'   $man[0].source_dataset 'manual'
+    Check 'local CSV: blank source_dataset'  $man[1].source_dataset 'local: employers-manual.csv'
+    # in_zone in your own CSV, added 2026-11-20 (1.12.0): it wins over ZIP and city.
+    $izr = @(ConvertFrom-LocalEmployerCsv "company,city,zip,in_zone`nExample Port District,,,true`nExample Water District,Harborview,00012,no`nExample Library,Harborview,00012,`nExample Transit,Eastgate,,TRUE`n" 'gov.csv')
+    Check 'in_zone: true with no address'    (Resolve-EmployerInZone $izr[0] $dSet) $true
+    Check 'in_zone: no beats an in-zone ZIP' (Resolve-EmployerInZone $izr[1] $dSet) $false
+    Check 'in_zone: blank falls to ZIP'      (Resolve-EmployerInZone $izr[2] $dSet) $true
+    Check 'in_zone: TRUE beats excluded city' (Resolve-EmployerInZone $izr[3] $dSet) $true
+    Check 'in_zone: dataset row uses ZIP'    (Resolve-EmployerInZone (New-EmployerRow -Company 'X' -Website '' -Industry '' -Dataset 'IRS EO BMF' -SourceId '' -City 'Eastgate' -Zip '00012' -SizeMeasure '' -SizeValue '' -Notes '') $dSet) $false
+    $izm = @(Merge-EmployerRow @(
+        (New-EmployerRow -Company 'Example Port District' -Website '' -Industry 'government' -Dataset 'IRS EO BMF' -SourceId '9' -City '' -Zip '' -SizeMeasure 'revenue' -SizeValue 5 -Notes ''),
+        $izr[0]))
+    Check 'in_zone: kept through a merge'    (Resolve-EmployerInZone $izm[0] $dSet) $true
     $locDrift = try { $null = ConvertFrom-LocalEmployerCsv "name,city`nA,B" 'x.csv'; 'read' } catch { $_.Exception.Message }
     Check 'local CSV: needs company'         $locDrift 'local CSV x.csv : missing column(s) company'
 
