@@ -1473,7 +1473,7 @@ if (Test-Path -LiteralPath $discPath) {
     $discWant = @('Get-DiscoverySetting', 'ConvertTo-ZipFive', 'ConvertTo-NameCase', 'Test-EmployerInZone', 'Get-EmployerNameKey',
                   'Test-EmployerInProfile', 'Get-NteeIndustry', 'Assert-DatasetColumn', 'New-EmployerRow', 'ConvertFrom-IrsEoCsv',
                   'ConvertFrom-NcuaCallReport', 'Get-NcuaNewestZip', 'ConvertFrom-FdicInstitution', 'ConvertFrom-LocalEmployerCsv',
-                  'Merge-EmployerRow', 'Test-RobotsAllowed')
+                  'Merge-EmployerRow', 'Test-RobotsAllowed', 'Get-EmployerNameExclusion')
     $dFns = @($dAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $discWant -contains $n.Name }, $true))
     Check 'discovery helpers all found' $dFns.Count $discWant.Count
     . ([scriptblock]::Create((@($dFns | ForEach-Object { $_.Extent.Text }) -join "`n`n")))
@@ -1484,6 +1484,23 @@ if (Test-Path -LiteralPath $discPath) {
     Check 'setting: default revenue floor'   $dSet.MinNonprofitRevenue 10000000
     Check 'setting: default datasets'        ($dSet.Datasets -join ',') 'IRS,NCUA,FDIC,Local'
     Check 'setting: no Discovery block'      ((Get-DiscoverySetting @{}).MinBankAssets) 500000000
+
+    $nxSet = Get-DiscoverySetting @{ Discovery = @{ NameExclude = @('^(the )?harborview community fund$', 'hospital foundation$', '') } }
+    Check 'setting: NameExclude default empty' (@((Get-DiscoverySetting @{}).NameExclude).Count) 0
+    Check 'setting: NameExclude blank dropped' (@($nxSet.NameExclude).Count) 2
+    Check 'name exclude: anchored, any case'  (Get-EmployerNameExclusion 'THE HARBORVIEW COMMUNITY FUND' $nxSet) '^(the )?harborview community fund$'
+    Check 'name exclude: anchored, not longer' (Get-EmployerNameExclusion 'Harborview Community Fund Housing' $nxSet) ''
+    Check 'name exclude: suffix pattern'      (Get-EmployerNameExclusion 'Example Hospital Foundation' $nxSet) 'hospital foundation$'
+    Check 'name exclude: parent kept'         (Get-EmployerNameExclusion 'Example Hospital' $nxSet) ''
+    Check 'name exclude: none set'            (Get-EmployerNameExclusion 'Example Hospital Foundation' $dSet) ''
+    $exNx = @()
+    try {
+        $exProf = Import-PowerShellDataFile -LiteralPath (Join-Path (Split-Path -Parent $SweepScript) 'JobSweep.local.example.psd1')
+        $exNx = @((Get-DiscoverySetting $exProf).NameExclude)
+    } catch { Write-Verbose "example profile not read: $($_.Exception.Message)" }
+    Check 'example: NameExclude shipped'      ($exNx.Count -gt 0) $true
+    $badNx = @($exNx | Where-Object { try { $null = [regex]::new([string]$_); $false } catch { $true } })
+    Check 'example: NameExclude patterns compile' $badNx.Count 0
 
     Check 'zone: ZIP prefix'                 (Test-EmployerInZone '00012-3456' 'Lakeside' $dSet) $true
     Check 'zone: exact ZIP'                  (Test-EmployerInZone '00150' 'Northfield' $dSet) $true
