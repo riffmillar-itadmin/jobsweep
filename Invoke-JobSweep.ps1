@@ -154,6 +154,8 @@
     isolved Talent Acquisition) -- the job list as JSON from the board's own
     /core/jobs/<domainId> call, with the sitemap and each posting's JobPosting
     block as failover; description from each survivor's JobPosting block.
+    1.9.1 (2026-11-19): ADP employers on workforcenow.cloud.adp.com. Optional
+    AdpHost on an ADP source; on a 404 the collector tries the other ADP host.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -186,7 +188,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.9.0'
+$JobSweepVersion = '1.9.1'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -541,6 +543,15 @@ function Get-HttpFailure {
         }
     } catch { Write-Verbose "HTTP failure details unavailable: $($_.Exception.Message)" }
     return $result
+}
+
+function Test-HttpNotFound {
+    <# True when a web error is a 404. The status comes from the response where
+       there is one; the message is the fallback ("404 (Not Found)" on 7,
+       "(404) Not Found" on 5.1). #>
+    param($ErrorRecord)
+    if ((Get-HttpFailure $ErrorRecord).Status -eq 404) { return $true }
+    return ([string]$ErrorRecord.Exception.Message -match '\b404\b')
 }
 
 function Get-GiveUpLevel {
@@ -1351,9 +1362,34 @@ function Add-WorkdayDetail {
     Start-Sleep -Milliseconds $script:Throttle
 }
 
+function Get-AdpHost {
+    <# ADP serves WorkforceNow careers on two hosts. Most employers answer on
+       workforcenow.adp.com; some live on workforcenow.cloud.adp.com, and the
+       plain host gives them a 404 (seen 2026-11-19). AdpHost on the source
+       picks the host. Anything that is not one of the two is refused, so a
+       typo can't send requests somewhere else. #>
+    param($Src)
+    $h = 'https://workforcenow.adp.com'
+    if ($Src.ContainsKey('AdpHost') -and $Src.AdpHost) {
+        $h = ([string]$Src.AdpHost).Trim().TrimEnd('/').ToLower()
+        if ($h -notmatch '^https?://') { $h = "https://$h" }
+        if ($h -notmatch '^https://workforcenow(\.cloud)?\.adp\.com$') {
+            throw "AdpHost '$($Src.AdpHost)' is not an ADP WorkforceNow host (workforcenow.adp.com or workforcenow.cloud.adp.com)"
+        }
+    }
+    return $h
+}
+
+function Get-AdpOtherHost {
+    param([string]$AdpHost)
+    if ($AdpHost -like '*.cloud.adp.com') { return 'https://workforcenow.adp.com' }
+    return 'https://workforcenow.cloud.adp.com'
+}
+
 function Get-AdpJobs {
     param($Src)
-    $base = 'https://workforcenow.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions'
+    $adpHost = Get-AdpHost $Src
+    $path = '/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions'
     $qs   = "cid=$($Src.Cid)&ccId=$($Src.CcId)&lang=en_US"
     $out  = @()
     $ids  = @{}
@@ -1361,7 +1397,19 @@ function Get-AdpJobs {
     $page = 0
     while ($page -lt 20) {
         $page++
-        $resp = Invoke-Json ("$base" + "?" + $qs + '&$top=50&$skip=' + $skip)
+        $tail = '?' + $qs + '&$top=50&$skip=' + $skip
+        try {
+            $resp = Invoke-Json ($adpHost + $path + $tail)
+        } catch {
+            # Failover: a 404 on the first page usually means the employer is on
+            # the other ADP host. Try it once, and say which host answered.
+            if ($page -ne 1 -or -not (Test-HttpNotFound $_)) { throw }
+            $alt = Get-AdpOtherHost $adpHost
+            Write-Log "ADP $($Src.Company): $adpHost returned 404, trying $alt" 'INFO'
+            $resp = Invoke-Json ($alt + $path + $tail)
+            Write-Log "ADP $($Src.Company): answered on $alt -- set AdpHost='$alt' on this source" 'WARN'
+            $adpHost = $alt
+        }
         $reqs = @()
         if ($resp.PSObject.Properties.Name -contains 'jobRequisitions' -and $resp.jobRequisitions) {
             $reqs = @($resp.jobRequisitions)
@@ -1404,11 +1452,11 @@ function Get-AdpJobs {
             $title = ''
             if ($j.PSObject.Properties.Name -contains 'requisitionTitle') { $title = $j.requisitionTitle }
             if (-not $title) { continue }
-            $url = "https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?$qs&jobId=$ext"
+            $url = "$adpHost/mascsr/default/mdf/recruitment/recruitment.html?$qs&jobId=$ext"
 
             $out += New-Posting -Source 'ADP' -Company $Src.Company -Title $title `
                         -Location $loc -Url $url -ReqId $reqNo -Posted $posted -Content '' |
-                    Add-Member -NotePropertyName DetailPath -NotePropertyValue ("$base/$ext" + "?" + $qs) -PassThru
+                    Add-Member -NotePropertyName DetailPath -NotePropertyValue ("$adpHost$path/$ext" + "?" + $qs) -PassThru
         }
         # the server caps the page size itself; stop when a page brings nothing new
         if ($added -eq 0) { break }

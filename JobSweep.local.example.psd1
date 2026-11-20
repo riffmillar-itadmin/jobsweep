@@ -127,6 +127,7 @@ ClearanceScreen = 'check'
 #   iCIMS       careers-<Token>.icims.com               -- Token is in the host
 #   UltiPro     <Tenant>.ultipro.com, BoardId is the opportunity GUID
 #   ADP         Cid and CcId are query parameters on the careers URL
+#               AdpHost only when the URL is on workforcenow.cloud.adp.com
 #   Dayforce    jobs.dayforcehcm.com/en-US/<Namespace>/<Board>/jobs -- both in the URL
 #   Rippling    ats.rippling.com/<Board>/jobs           -- Board is in the URL, case and all
 #   Paylocity   recruiting.paylocity.com/recruiting/jobs/All/<BoardId> -- the GUID in the board URL

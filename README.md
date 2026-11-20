@@ -39,7 +39,7 @@ That is what the test suite is for.
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs and company names into `Sources` entries you can paste. See [Finding new sources](#finding-new-sources). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 584 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 611 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -196,7 +196,8 @@ so open the board before you add it. Workday, iCIMS, UltiPro, ADP, Paylocity and
 need a URL; for Paylocity it is the board URL with the GUID in it
 (`recruiting.paylocity.com/recruiting/jobs/All/<GUID>`), since a posting URL
 does not name its board. An ApplicantPro URL names its tenant in the host
-(`<tenant>.applicantpro.com`).
+(`<tenant>.applicantpro.com`). An ADP URL on `workforcenow.cloud.adp.com` gets
+`AdpHost` in its line, because those employers are not found on the plain host.
 
 Good places to find URLs:
 
@@ -246,7 +247,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1168  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1222  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -254,11 +255,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  584    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  584    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  611    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  611    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1168  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1222  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -297,6 +298,17 @@ decide what ships.
 
 ## Changelog
 
+- **1.9.1** (2026-11-19): ADP employers on `workforcenow.cloud.adp.com`.
+  - Some WorkforceNow employers live on ADP's `.cloud.` host, and the plain
+    `workforcenow.adp.com` host answers 404 for them. An ADP source can now
+    carry `AdpHost='https://workforcenow.cloud.adp.com'`; only the two ADP
+    hosts are accepted.
+  - Failover: when the first page of an ADP list gets a 404, the collector
+    tries the other ADP host once. If that answers, the run carries on there
+    and logs a warning naming the `AdpHost` to set.
+  - The scout keeps the `.cloud.` host from a careers URL instead of dropping
+    it, and the source check flags an `AdpHost` that is not an ADP host.
+  - 27 new regression cases (611).
 - **1.9.0** (2026-11-19): an ApplicantPro provider (`<tenant>.applicantpro.com`,
   now sold as isolved Talent Acquisition).
   - The board's `/jobs/` page is built in the browser, so its HTML holds no
