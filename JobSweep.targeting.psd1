@@ -118,6 +118,12 @@ TitleExclude = @(
     # managed-service provider's "IT Client Support Specialist" is kept.
     '\bcrisis\b','family support','resident support','clinical support specialist',
     'member support specialist',
+    # Added 2026-11-20 (1.12.1) from the first sweep with the finder's boards:
+    # a housing agency's "Housing Support Specialist" and a hospital's "NICU Support
+    # Specialist". Replayed across 14,436 past titles: 'housing support' drops only
+    # that title, and every '\bnicu\b' title is clinical. Bare 'housing' is left out
+    # because a university's Housing & Food Services department hires IT staff.
+    'housing support','\bnicu\b',
     '^(?!.*\b(it|technical|desktop|computer|systems?)\b).*client support specialist',
     # Defense operations research -- Bluehawk's three ORSA reqs matched
     # 'systems analyst' and are a different profession entirely.

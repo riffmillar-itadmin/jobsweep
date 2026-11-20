@@ -170,6 +170,8 @@
     kinds of employer (consultancies, for example) from any dataset; your own
     CSV keeps its source_dataset (such as 'manual') and its in_zone (true or
     false wins over ZIP and city); NTEE H and U are labelled research institutes.
+    1.12.1 (2026-11-20): housing support and NICU titles are excluded. They had
+    matched 'support specialist'.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -202,7 +204,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.12.0'
+$JobSweepVersion = '1.12.1'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
