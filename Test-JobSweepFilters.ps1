@@ -124,7 +124,8 @@ $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteT
           'Get-ApplicantProDomainId','ConvertTo-ApplicantProPay','ConvertFrom-ApplicantProJob',
           'ConvertFrom-ApplicantProDetail','Get-ApplicantProSitemapId','Get-ApplicantProJobs','Add-ApplicantProDetail',
           'Get-MicrosoftQuery','Get-MicrosoftGapText','Get-MicrosoftJobs','Get-RetryCoolOffWait',
-          'Invoke-MicrosoftRetryPass','Get-WebTimeoutParameter','Get-GiveUpLevel')
+          'Invoke-MicrosoftRetryPass','Get-WebTimeoutParameter','Get-GiveUpLevel',
+          'Get-HttpFailure','Test-HttpNotFound','Get-AdpHost','Get-AdpOtherHost','Get-AdpJobs')
 $parts = @()
 
 $assign = @($ast.FindAll({ param($n)
@@ -1294,6 +1295,78 @@ Check 'ApplicantPro failover: log says how'         (@($script:testLog | Where-O
 $script:apListFails = $false
 Remove-Item Function:\Invoke-Html, Function:\Invoke-Json, Function:\Write-Log
 
+# ---- ADP: TWO HOSTS, added 1.9.1 -------------------------------------------
+# Some WorkforceNow employers live on workforcenow.cloud.adp.com and get a 404
+# from workforcenow.adp.com. AdpHost picks the host; a 404 on the first page
+# makes the collector try the other host once and say which one answered.
+Write-Host "`n-- ADP: plain and .cloud. hosts --"
+Check 'ADP host: default is the plain host'      (Get-AdpHost @{ Cid = 'x' }) 'https://workforcenow.adp.com'
+Check 'ADP host: cloud host kept'                (Get-AdpHost @{ AdpHost = 'https://workforcenow.cloud.adp.com/' }) 'https://workforcenow.cloud.adp.com'
+Check 'ADP host: bare host gets https'           (Get-AdpHost @{ AdpHost = 'WorkforceNow.Cloud.ADP.com' }) 'https://workforcenow.cloud.adp.com'
+$adpBad = try { Get-AdpHost @{ AdpHost = 'https://example.org' }; 'accepted' } catch { 'refused' }
+Check 'ADP host: other hosts refused'            $adpBad 'refused'
+Check 'ADP other host: from plain'               (Get-AdpOtherHost 'https://workforcenow.adp.com') 'https://workforcenow.cloud.adp.com'
+Check 'ADP other host: from cloud'               (Get-AdpOtherHost 'https://workforcenow.cloud.adp.com') 'https://workforcenow.adp.com'
+Check 'ADP 404: PS 7 message'                    (Test-HttpNotFound ([Management.Automation.ErrorRecord]::new([Exception]::new('Response status code does not indicate success: 404 (Not Found).'), 'x', 'NotSpecified', $null))) $true
+Check 'ADP 404: PS 5.1 message'                  (Test-HttpNotFound ([Management.Automation.ErrorRecord]::new([Exception]::new('The remote server returned an error: (404) Not Found.'), 'x', 'NotSpecified', $null))) $true
+Check 'ADP 404: a 500 is not one'                (Test-HttpNotFound ([Management.Automation.ErrorRecord]::new([Exception]::new('Response status code does not indicate success: 500 (Internal Server Error).'), 'x', 'NotSpecified', $null))) $false
+
+$adpPage = [pscustomobject]@{ jobRequisitions = @(
+    [pscustomobject]@{ requisitionTitle = 'Systems Administrator'; postDate = '2026-11-02T00:00:00Z'; clientRequisitionID = 'R-101'
+        customFieldGroup = [pscustomobject]@{ stringFields = @([pscustomobject]@{ stringValue = '9000000001' }) }
+        requisitionLocations = @([pscustomobject]@{ address = [pscustomobject]@{ cityName = 'Harborview'; countrySubdivisionLevel1 = [pscustomobject]@{ codeValue = 'WM' } } }) }
+    [pscustomobject]@{ requisitionTitle = 'Help Desk Analyst'; postDate = '2026-11-05T00:00:00Z'
+        customFieldGroup = [pscustomobject]@{ stringFields = @([pscustomobject]@{ stringValue = '9000000002' }) } }
+) }
+$script:testLog = @()
+function Write-Log {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '',
+        Justification = 'Test stand-in for the collector''s own Write-Log; records lines instead of printing them.')]
+    param([string]$Message, [string]$Level = 'INFO')
+    $script:testLog += "[$Level] $Message"
+}
+$script:adpCalls = @(); $script:adpLive = 'https://workforcenow.cloud.adp.com'
+function Invoke-Json { param([string]$Uri)
+    $script:adpCalls += $Uri
+    if (-not $Uri.StartsWith($script:adpLive + '/')) { throw 'Response status code does not indicate success: 404 (Not Found).' }
+    if ($Uri -like '*$skip=0') { return $adpPage }
+    return [pscustomobject]@{ jobRequisitions = @() }
+}
+$adpCloud = @{ Company = 'Example Clinic'; Cid = '00000000-0000-0000-0000-000000000000'; CcId = '19000101_000003' }
+
+# set AdpHost: the cloud host answers straight away, no failover
+$adpSet = @(Get-AdpJobs ($adpCloud + @{ AdpHost = 'https://workforcenow.cloud.adp.com' }))
+Check 'ADP cloud: postings read'                 (($adpSet | ForEach-Object Title) -join ', ') 'Systems Administrator, Help Desk Analyst'
+Check 'ADP cloud: first call on the cloud host'  ($script:adpCalls[0] -like 'https://workforcenow.cloud.adp.com/mascsr/*') $true
+Check 'ADP cloud: no 404, no failover'           (@($script:testLog | Where-Object { $_ -like '*returned 404*' }).Count) 0
+Check 'ADP cloud: posting url on the cloud host' $adpSet[0].Url 'https://workforcenow.cloud.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=00000000-0000-0000-0000-000000000000&ccId=19000101_000003&lang=en_US&jobId=9000000001'
+Check 'ADP cloud: detail on the cloud host'      ($adpSet[0].DetailPath -like 'https://workforcenow.cloud.adp.com/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions/9000000001?cid=*') $true
+Check 'ADP cloud: place and requisition'         ('{0} | {1}' -f $adpSet[0].Location, $adpSet[0].ReqId) 'Harborview, WM | R-101'
+
+# no AdpHost: the plain host 404s, the cloud host answers, and the log says so
+$script:adpCalls = @(); $script:testLog = @()
+$adpFo = @(Get-AdpJobs $adpCloud)
+Check 'ADP failover: postings still read'        $adpFo.Count 2
+Check 'ADP failover: plain host tried first'     ($script:adpCalls[0] -like 'https://workforcenow.adp.com/mascsr/*') $true
+Check 'ADP failover: then the cloud host'        ($script:adpCalls[1] -like 'https://workforcenow.cloud.adp.com/mascsr/*') $true
+Check 'ADP failover: later pages stay on it'     (@($script:adpCalls | Select-Object -Skip 1 | Where-Object { $_ -notlike 'https://workforcenow.cloud.adp.com/*' }).Count) 0
+Check 'ADP failover: url on the host that answered' ($adpFo[0].Url -like 'https://workforcenow.cloud.adp.com/*') $true
+Check 'ADP failover: warns with the fix'         (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like "*ADP Example Clinic: answered on https://workforcenow.cloud.adp.com -- set AdpHost='https://workforcenow.cloud.adp.com'*" }).Count) 1
+
+# plain-host employers are unchanged: no failover, no warning
+$script:adpLive = 'https://workforcenow.adp.com'; $script:adpCalls = @(); $script:testLog = @()
+$adpPlain = @(Get-AdpJobs $adpCloud)
+Check 'ADP plain: postings read'                 $adpPlain.Count 2
+Check 'ADP plain: url on the plain host'         ($adpPlain[0].Url -like 'https://workforcenow.adp.com/mascsr/*') $true
+Check 'ADP plain: no warning'                    (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') }).Count) 0
+
+# both hosts 404: the error still reaches the caller, after one try on each
+$script:adpLive = 'https://nowhere.invalid'; $script:adpCalls = @()
+$adpBoth = try { $null = Get-AdpJobs $adpCloud; 'no error' } catch { $_.Exception.Message }
+Check 'ADP both 404: error not swallowed'        ($adpBoth -like '*404*') $true
+Check 'ADP both 404: one try per host'           $script:adpCalls.Count 2
+Remove-Item Function:\Invoke-Json, Function:\Write-Log
+
 # ---- SOURCES CARRY THE KEYS THEIR PROVIDER READS, added 2026-11-03 -------
 # The example profile shipped a Workday entry with Dc= and an iCIMS entry with
 # Token=, but the collector reads WdHost and BaseUrl. Anyone copying them got a
@@ -1309,6 +1382,9 @@ foreach ($s in @($Config.Sources)) {
     if (-not $needs.ContainsKey([string]$s.Provider)) { $badSrc += "$($s.Company): unknown Provider '$($s.Provider)'"; continue }
     $miss = @($needs[[string]$s.Provider] | Where-Object { -not $s.ContainsKey($_) -or -not $s[$_] })
     if ($miss.Count -gt 0) { $badSrc += "$($s.Company) ($($s.Provider)): missing $($miss -join ', ')" }
+    if ([string]$s.Provider -eq 'ADP') {
+        try { $null = Get-AdpHost $s } catch { $badSrc += "$($s.Company) (ADP): $($_.Exception.Message)" }
+    }
 }
 Check 'every source has its keys'  ($badSrc -join '; ')  ''
 
@@ -1342,6 +1418,7 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'UltiPro numbered host'  (& $u 'https://recruiting2.ultipro.com/EXA1001EXAMP/JobBoard/00000000-0000-0000-0000-000000000000/?q=') "@{ Provider='UltiPro'; Tenant='EXA1001EXAMP'; UkgHost='https://recruiting2.ultipro.com'; BoardId='00000000-0000-0000-0000-000000000000' }"
     Check 'ADP cid and ccId'       (& $u 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=00000000-0000-0000-0000-000000000000&ccId=19000101_000001&lang=en_US') "@{ Provider='ADP'; Cid='00000000-0000-0000-0000-000000000000'; CcId='19000101_000001' }"
     Check 'ADP without cid'        (& $u 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html') 'none'
+    Check 'ADP cloud host kept'    (& $u 'https://workforcenow.cloud.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=00000000-0000-0000-0000-000000000000&ccId=19000101_000003&lang=en_US&jobId=1') "@{ Provider='ADP'; Cid='00000000-0000-0000-0000-000000000000'; CcId='19000101_000003'; AdpHost='https://workforcenow.cloud.adp.com' }"
     Check 'Dayforce with board'    (& $u 'https://jobs.dayforcehcm.com/en-US/examplelogistics/CANDIDATEPORTAL/jobs/123') "@{ Provider='Dayforce'; Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }"
     Check 'Dayforce no board'      (& $u 'https://jobs.dayforcehcm.com/examplelogistics')                  "@{ Provider='Dayforce'; Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }"
     Check 'Rippling board keeps case' (& $u 'https://ats.rippling.com/Example-Robotics/jobs/00000000-0000-0000-0000-000000000001')   "@{ Provider='Rippling'; Board='Example-Robotics' }"

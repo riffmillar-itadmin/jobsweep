@@ -125,12 +125,15 @@ function ConvertFrom-CareersUrl {
         return $e
     }
 
-    if ($u -match '(?i)^https?://workforcenow\.adp\.com/') {
+    if ($u -match '(?i)^https?://workforcenow\.(cloud\.)?adp\.com/') {
+        $cloud = [bool]$Matches[1]
         $cid = [regex]::Match($u, '(?i)[?&]cid=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})')
         if ($cid.Success) {
             $e = @{ Provider = 'ADP'; Cid = $cid.Groups[1].Value.ToLower() }
             $cc = [regex]::Match($u, '(?i)[?&]ccId=([^&#]+)')
             if ($cc.Success) { $e['CcId'] = [uri]::UnescapeDataString($cc.Groups[1].Value) }
+            # employers on the .cloud. host get a 404 from the plain one, so keep it
+            if ($cloud) { $e['AdpHost'] = 'https://workforcenow.cloud.adp.com' }
             return $e
         }
         return $null
@@ -217,7 +220,7 @@ function Get-SourceKey {
 function Format-SourceEntry {
     <# One Sources line in the profile's own style, keys in a fixed order. #>
     param([hashtable]$Src)
-    $order = @('Provider', 'Company', 'Token', 'WdHost', 'Tenant', 'Site', 'BaseUrl', 'UkgHost', 'PlcHost', 'BoardId', 'Cid', 'CcId', 'Namespace', 'Board')
+    $order = @('Provider', 'Company', 'Token', 'WdHost', 'Tenant', 'Site', 'BaseUrl', 'UkgHost', 'PlcHost', 'BoardId', 'Cid', 'CcId', 'AdpHost', 'Namespace', 'Board')
     $q = { param($s) "'" + ([string]$s -replace "'", "''") + "'" }
     $parts = foreach ($k in $order) { if ($Src.ContainsKey($k) -and $Src[$k]) { '{0}={1}' -f $k, (& $q $Src[$k]) } }
     return '@{ ' + ($parts -join '; ') + ' }'
