@@ -38,9 +38,9 @@ That is what the test suite is for.
 | `JobSweep.local.psd1` | ⛔ **gitignored** | **Where you will go and who you are watching.** Geography, commute boundary, remote rules, and the employer list. |
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
-| `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs and company names into `Sources` entries you can paste. See [Finding new sources](#finding-new-sources). |
+| `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs, company names or an employer list into `Sources` entries you can paste, finding careers pages on the way. See [Finding new sources](#finding-new-sources). |
 | `Find-JobSweepEmployers.ps1` | ✅ | Employer discovery. Lists employers in your zone from public datasets, for the scout to work through. See [Finding employers](#finding-employers). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 677 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 709 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -199,6 +199,32 @@ need a URL; for Paylocity it is the board URL with the GUID in it
 does not name its board. An ApplicantPro URL names its tenant in the host
 (`<tenant>.applicantpro.com`). An ADP URL on `workforcenow.cloud.adp.com` gets
 `AdpHost` in its line, because those employers are not found on the plain host.
+The older Dayforce form, `usNN.dayforcehcm.com/CandidatePortal/<lang>/<namespace>`,
+is read as the same board on `jobs.dayforcehcm.com`.
+
+Starting from employer names instead, such as the list `Find-JobSweepEmployers.ps1`
+writes, the scout first finds each careers page:
+
+```powershell
+.\Find-JobSweepSources.ps1 -EmployerCsv .\Sweeps\employers-2026-01-15.csv
+```
+
+For each employer it uses `careers_url` if the row has one, else the careers
+link on the `website`, else a guessed website. A guess counts only when the
+page title names the employer and the page names its `city`, so a namesake in
+another state is refused. It then reads the applicant-tracking system behind the
+careers page. A system the collector reads goes on to the usual probe and gets
+a paste-ready line; any other is reported by name (`unsupported ATS (Paycom)`)
+and counted in a tally. The rest are `no website found`, `no careers link
+found`, `needs a browser`, `no ATS found` (the employer lists jobs on its own
+site) or `blocked by robots`. Two employers that share a board get one paste
+line. Every row goes to `finder-<date>.csv` beside the
+list, and the summary holds the tally.
+
+Employer pages are fetched only where the site's robots.txt allows it, a second
+apart by default. Search engines do not allow automated searching, so the
+finder never uses one: a row with no website relies on the guess, and a
+website you add to the list by hand always wins.
 
 Good places to find URLs:
 
@@ -288,7 +314,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1354  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1418  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -296,11 +322,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  677    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  677    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  709    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  709    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1354  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1418  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -339,6 +365,20 @@ decide what ships.
 
 ## Changelog
 
+- **1.11.0** (2026-11-19): careers-page finder in the scout.
+  - `Find-JobSweepSources.ps1 -EmployerCsv` takes an employer list and finds
+    each careers page from `careers_url`, the `website`'s careers link, or a
+    guessed website that names the employer and its city.
+  - Reads the applicant-tracking system behind the page. Supported ones go on
+    to the usual probe; others are named and tallied (`unsupported ATS`).
+    Statuses for the rest: no website found, no careers link found, needs a
+    browser, no ATS found, blocked by robots.
+  - robots.txt is checked for every employer site; one request a second.
+  - Every row is written to `finder-<date>.csv` beside the list.
+  - The scout reads legacy Dayforce `usNN.dayforcehcm.com/CandidatePortal` URLs.
+  - Two employers that share a board (a parent and an affiliate) get one
+    paste line; the second is reported as `same board as above`.
+  - 32 new regression cases (709).
 - **1.10.1** (2026-11-19): `Discovery.NameExclude` for the employer list.
   - Regular expressions matched against the employer name, in any case. Each
     match is dropped, printed as `name excluded: <name> (<pattern>)` and

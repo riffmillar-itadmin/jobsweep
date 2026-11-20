@@ -1605,6 +1605,76 @@ if (Test-Path -LiteralPath $discPath) {
     Check 'robots: no file allows'           (Test-RobotsAllowed '' '/anything') $true
 }
 
+# ---- CAREERS-PAGE FINDER (Find-JobSweepSources.ps1 -EmployerCsv), added 1.11.0 -
+# Link reading, the careers-link pick, ATS detection, domain guesses and the
+# namesake check. Offline: fixture pages stand in for employer sites.
+Write-Host "`n-- FINDER: careers links, ATS detection, website guesses --"
+if ((Test-Path -LiteralPath $scoutPath) -and (Get-Command Get-EmployerNameKey -ErrorAction SilentlyContinue)) {
+    $finderWant = @('Get-UnsupportedAtsHost', 'Get-PageLink', 'Select-CareersLink', 'Find-AtsReference', 'Get-EmployerWord',
+                    'Get-DomainGuess', 'Test-PageNamesEmployer', 'Test-PageNeedsBrowser')
+    $fFns = @($sAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $finderWant -contains $n.Name }, $true))
+    Check 'finder helpers all found' $fFns.Count $finderWant.Count
+    . ([scriptblock]::Create((@($fFns | ForEach-Object { $_.Extent.Text }) -join "`n`n")))
+
+    Check 'legacy Dayforce URL'      (& $u 'https://usr58.dayforcehcm.com/CandidatePortal/en-US/examplelogistics/Posting/View/123') "@{ Provider='Dayforce'; Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }"
+    Check 'legacy Dayforce us host'  (& $u 'https://us62.dayforcehcm.com/CandidatePortal/examplelogistics') "@{ Provider='Dayforce'; Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }"
+
+    $home1 = @'
+<html><head><title>Harborview Example Clinic | Care close to home</title></head><body>
+<a href="/about">About</a> <a href="/volunteer-opportunities/">Volunteer opportunities</a>
+<a href="/careers/">Careers</a> <a href="https://www.example.org/donate">Donate</a>
+<a href="mailto:hr@example.org">Email</a> <a href="#top">Top</a>
+<footer>100 Example Way, Harborview, WM 00012</footer></body></html>
+'@
+    $lk = @(Get-PageLink $home1 'https://www.harborviewexampleclinic.org/')
+    Check 'links: mailto and anchors dropped'  $lk.Count 4
+    Check 'links: made absolute'               $lk[2].Url 'https://www.harborviewexampleclinic.org/careers/'
+    Check 'careers: "Careers" beats volunteer' (Select-CareersLink $lk) 'https://www.harborviewexampleclinic.org/careers/'
+    $volOnly = @([pscustomobject]@{ Url = 'https://x.example.org/volunteer-opportunities/'; Text = 'Volunteer opportunities' })
+    Check 'careers: volunteer page refused'    (Select-CareersLink $volOnly) ''
+    $pathOnly = @([pscustomobject]@{ Url = 'https://x.example.org/about/join-us/'; Text = 'Get involved' })
+    Check 'careers: path alone counts'         (Select-CareersLink $pathOnly) 'https://x.example.org/about/join-us/'
+    $res = @([pscustomobject]@{ Url = 'https://x.example.org/learn/career-resources'; Text = 'Career resources' })
+    Check 'careers: career resources refused'  (Select-CareersLink $res) ''
+
+    $a = Find-AtsReference '<iframe src="https://boards.greenhouse.io/embed/job_board?for=exampleclinic"></iframe>' 'https://x.example.org/careers'
+    Check 'ATS: Greenhouse iframe'      ('{0} {1} {2}' -f $a.Kind, $a.Ats, $a.Src.Token) 'supported Greenhouse exampleclinic'
+    $a = Find-AtsReference '<a href="https://recruiting.paylocity.com/recruiting/jobs/All/00000000-0000-0000-0000-0000000000aa/Example-Clinic">Openings</a>' 'https://x.example.org/careers'
+    Check 'ATS: Paylocity link'         ('{0} {1}' -f $a.Kind, $a.Ats) 'supported Paylocity'
+    $a = Find-AtsReference '<a href="https://jobs.jobvite.com/exampleclinic/jobs">Jobs</a> <a href="https://boards.greenhouse.io/exampleclinic">GH</a>' 'https://x.example.org/careers'
+    Check 'ATS: supported wins'         $a.Ats 'Greenhouse'
+    $a = Find-AtsReference '<a href="https://www.paycomonline.net/v4/ats/web.php/jobs?clientkey=EXAMPLE">Apply</a>' 'https://x.example.org/careers'
+    Check 'ATS: unsupported named'      ('{0} {1}' -f $a.Kind, $a.Ats) 'unsupported Paycom'
+    $a = Find-AtsReference '<script src="https://careers-content.clearcompany.com/js/v1/career-site.js?siteId=x"></script>' 'https://x.example.org/careers'
+    Check 'ATS: script source counts'   $a.Ats 'ClearCompany'
+    $a = Find-AtsReference '' 'https://usr58.dayforcehcm.com/CandidatePortal/en-US/exampleclinic'
+    Check 'ATS: the page URL itself'    ('{0} {1}' -f $a.Ats, $a.Src.Namespace) 'Dayforce exampleclinic'
+    Check 'ATS: none on a plain page'   ($null -eq (Find-AtsReference '<p>Email your resume to us.</p>' 'https://x.example.org/careers')) $true
+
+    Check 'words: generic tail dropped' ((Get-EmployerWord 'Harborview Example Services Association') -join ',') 'harborview,example'
+    $gs = @(Get-DomainGuess 'Harborview Example Clinic')
+    Check 'guess: run together first'   $gs[0] 'https://www.harborviewexampleclinic.org/'
+    Check 'guess: without generic tail' ($gs -contains 'https://www.harborviewexample.org/') $true
+    Check 'guess: without place name'   ($gs -contains 'https://www.exampleclinic.org/') $true
+    Check 'guess: capped'               (@(Get-DomainGuess 'Harborview Example Clinic Of Westmark' -Max 3).Count) 3
+    Check 'guess: blank name'           (@(Get-DomainGuess '').Count) 0
+
+    Check 'namesake: title and city'    (Test-PageNamesEmployer $home1 'HARBORVIEW EXAMPLE CLINIC' 'Harborview') $true
+    $elsewhere = '<html><head><title>Example Clinic | Eastgate</title></head><body>Eastgate, ZZ</body></html>'
+    Check 'namesake: other city refused' (Test-PageNamesEmployer $elsewhere 'Example Clinic' 'Harborview') $false
+    Check 'namesake: other name refused' (Test-PageNamesEmployer $home1 'Lakeside Dental Group' 'Harborview') $false
+    Check 'namesake: no city given'     (Test-PageNamesEmployer $elsewhere 'Example Clinic' '') $true
+
+    Check 'browser: script shell'       (Test-PageNeedsBrowser '<div id="root"></div><noscript>Please enable JavaScript</noscript>' 1) $true
+    Check 'browser: ordinary page'      (Test-PageNeedsBrowser $home1 4) $false
+    Check 'browser: many links'         (Test-PageNeedsBrowser '<div id="app"></div>' 40) $false
+    Check 'browser: no links at all'    (Test-PageNeedsBrowser '<html><body><script src="/bundle.js"></script></body></html>' 0) $true
+    Check 'browser: a few links, no shell' (Test-PageNeedsBrowser '<p>Hello</p>' 6) $false
+    Check 'unsupported list has names'  ((Get-UnsupportedAtsHost).Contains('Jobvite')) $true
+} else {
+    Check 'finder needs the scout and the employer script' $false $true
+}
+
 } catch {
     $fail++
     $stoppedBy = "suite stopped at line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"
