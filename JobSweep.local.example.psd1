@@ -115,6 +115,41 @@ LiftingLimitLb = 50
 # note, because that is a door rather than a wall. Public Trust is not covered.
 ClearanceScreen = 'check'
 
+# ---- EMPLOYER DISCOVERY (Find-JobSweepEmployers.ps1) ----
+#
+# Optional. Find-JobSweepEmployers.ps1 reads public datasets (IRS nonprofits,
+# NCUA credit unions, FDIC banks) for one state, keeps the employers above the
+# size floors whose address is in your zone, and writes Sweeps\employers-<date>.csv
+# for the source scout. The zone is yours, so it lives here, not in the script.
+#
+#   State             two-letter state for the datasets ('WM' is the fictional
+#                     example state, so the datasets find nothing for it)
+#   ZoneZipPrefixes   ZIP prefixes in your zone ('000' = 00000-00099; this example uses unassigned ZIPs)
+#   ZoneZips          single ZIPs to add
+#   ZoneCities        city names to add (mailing address city)
+#   ZoneExclude*      ZIPs or cities to drop even when a rule above takes them in
+#   Min*              size floors in dollars: nonprofit revenue, credit union
+#                     and bank assets
+#   NteeExclude       nonprofit NTEE codes or major groups to drop ('X' religion)
+#   IrsSubsections    501(c) subsections to keep ('03' charities); benefit trusts
+#                     and union funds report big revenue but employ few people
+#   ExtraCsv          your own CSVs (company, website, industry, city, zip) for
+#                     employers no dataset covers, such as public agencies
+Discovery = @{
+    State                = 'WM'
+    ZoneZipPrefixes      = @('000')
+    ZoneZips             = @()
+    ZoneCities           = @('Harborview')
+    ZoneExcludeZips      = @()
+    ZoneExcludeCities    = @('Eastgate')
+    MinNonprofitRevenue  = 10000000
+    MinCreditUnionAssets = 100000000
+    MinBankAssets        = 500000000
+    NteeExclude          = @('X')
+    IrsSubsections       = @('03')
+    # ExtraCsv           = @('%USERPROFILE%\Documents\JobSweep\employers-extra.csv')
+}
+
 # ---- THE EMPLOYER LIST ----
 #
 # Every entry is one applicant-tracking-system tenant. The Token, Tenant, Cid,

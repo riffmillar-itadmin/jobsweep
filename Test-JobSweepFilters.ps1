@@ -1461,6 +1461,133 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'line: blank skipped'    (& $l '   ')                                       'none'
 }
 
+# ---- EMPLOYER DISCOVERY (Find-JobSweepEmployers.ps1), added 1.10.0 ---------
+# Readers for the public datasets, the zone, the already-in-profile check, the
+# merge and robots.txt. All offline: fixtures stand in for the downloads.
+Write-Host "`n-- DISCOVERY: dataset readers, zone, profile match, robots --"
+$discPath = Join-Path (Split-Path -Parent $SweepScript) 'Find-JobSweepEmployers.ps1'
+Check 'discovery script ships beside the sweep' (Test-Path -LiteralPath $discPath) $true
+if (Test-Path -LiteralPath $discPath) {
+    $dAst = [System.Management.Automation.Language.Parser]::ParseFile($discPath, [ref]$null, [ref]$parseErrors)
+    Check 'discovery script parses' (@($parseErrors).Count) 0
+    $discWant = @('Get-DiscoverySetting', 'ConvertTo-ZipFive', 'ConvertTo-NameCase', 'Test-EmployerInZone', 'Get-EmployerNameKey',
+                  'Test-EmployerInProfile', 'Get-NteeIndustry', 'Assert-DatasetColumn', 'New-EmployerRow', 'ConvertFrom-IrsEoCsv',
+                  'ConvertFrom-NcuaCallReport', 'Get-NcuaNewestZip', 'ConvertFrom-FdicInstitution', 'ConvertFrom-LocalEmployerCsv',
+                  'Merge-EmployerRow', 'Test-RobotsAllowed')
+    $dFns = @($dAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $discWant -contains $n.Name }, $true))
+    Check 'discovery helpers all found' $dFns.Count $discWant.Count
+    . ([scriptblock]::Create((@($dFns | ForEach-Object { $_.Extent.Text }) -join "`n`n")))
+
+    $dSet = Get-DiscoverySetting @{ Discovery = @{ State = 'wm'; ZoneZipPrefixes = @('000'); ZoneZips = @('00150'); ZoneCities = @('Harborview')
+                                                   ZoneExcludeZips = @('00077'); ZoneExcludeCities = @('Eastgate'); NteeExclude = @('X') } }
+    Check 'setting: state upper-cased'       $dSet.State 'WM'
+    Check 'setting: default revenue floor'   $dSet.MinNonprofitRevenue 10000000
+    Check 'setting: default datasets'        ($dSet.Datasets -join ',') 'IRS,NCUA,FDIC,Local'
+    Check 'setting: no Discovery block'      ((Get-DiscoverySetting @{}).MinBankAssets) 500000000
+
+    Check 'zone: ZIP prefix'                 (Test-EmployerInZone '00012-3456' 'Lakeside' $dSet) $true
+    Check 'zone: exact ZIP'                  (Test-EmployerInZone '00150' 'Northfield' $dSet) $true
+    Check 'zone: city, any case'             (Test-EmployerInZone '' 'HARBORVIEW' $dSet) $true
+    Check 'zone: excluded ZIP wins'          (Test-EmployerInZone '00077' 'Harborview' $dSet) $false
+    Check 'zone: excluded city wins'         (Test-EmployerInZone '00012' 'Eastgate' $dSet) $false
+    Check 'zone: outside'                    (Test-EmployerInZone '00199' 'Elsewhere' $dSet) $false
+    Check 'zone: none set = all in'          (Test-EmployerInZone '00199' 'Elsewhere' (Get-DiscoverySetting @{})) $true
+    Check 'ZIP+4 to five digits'             (ConvertTo-ZipFive '00012-3456') '00012'
+    Check 'name case from capitals'          (ConvertTo-NameCase 'EXAMPLE  HEALTH SERVICES INC') 'Example Health Services Inc'
+    Check 'name case left when mixed'        (ConvertTo-NameCase 'ExampleCU of Westmark') 'ExampleCU of Westmark'
+
+    Check 'name key: suffix and The'         (Get-EmployerNameKey 'The Example Clinic, Inc.') 'example clinic'
+    Check 'name key: ampersand'              (Get-EmployerNameKey 'Smith & Example LLC') 'smith and example'
+    $pk = @{ (Get-EmployerNameKey 'Example Health') = 'Example Health'; (Get-EmployerNameKey 'Harborview Credit Union') = 'Harborview Credit Union' }
+    Check 'profile: same name'               (Test-EmployerInProfile 'EXAMPLE HEALTH' $pk) 'Example Health'
+    Check 'profile: longer dataset name'     (Test-EmployerInProfile 'Example Health Services' $pk) 'Example Health'
+    Check 'profile: shorter dataset name'    (Test-EmployerInProfile 'Harborview' $pk) 'Harborview Credit Union'
+    Check 'profile: no partial word'         (Test-EmployerInProfile 'Example Healthcare Partners' $pk) ''
+
+    Check 'NTEE: health care'                (Get-NteeIndustry 'E220') 'health care'
+    Check 'NTEE: blank'                      (Get-NteeIndustry '') 'nonprofit (unclassified)'
+
+    $irs = @'
+"EIN","NAME","ICO","CITY","STATE","ZIP","REVENUE_AMT","NTEE_CD"
+"000000001","EXAMPLE MEDICAL CENTER","","HARBORVIEW","WM","00012-0001","250000000","E220"
+"000000002","EXAMPLE CHAPEL","","HARBORVIEW","WM","00012-0002","40000000","X20"
+"000000003","SMALL EXAMPLE FUND","","HARBORVIEW","WM","00012-0003","900000","T20"
+"000000004","EXAMPLE TRAINING ALLIANCE","","ELSEWHERE","WM","00199-0004","15000000",""
+'@
+    $ir = @(ConvertFrom-IrsEoCsv $irs $dSet)
+    Check 'IRS: floor and NTEE exclusion'    (($ir | ForEach-Object company) -join ', ') 'Example Medical Center, Example Training Alliance'
+    Check 'IRS: revenue as size'             ('{0} {1}' -f $ir[0].size_measure, $ir[0].size_value) 'revenue 250000000'
+    Check 'IRS: industry and note'           ('{0} | {1}' -f $ir[0].industry, $ir[0].notes) 'health care | NTEE E220'
+    Check 'IRS: EIN and five-digit ZIP'      ('{0} {1}' -f $ir[0].source_id, $ir[0].zip) '000000001 00012'
+    $irsSub = @'
+"EIN","NAME","CITY","ZIP","SUBSECTION","REVENUE_AMT","NTEE_CD"
+"000000005","EXAMPLE HOSPITAL","HARBORVIEW","00012","03","50000000","E22"
+"000000006","EXAMPLE WELFARE TRUST","HARBORVIEW","00012","09","90000000",""
+"000000007","EXAMPLE CREDIT UNION","HARBORVIEW","00012","14","60000000",""
+'@
+    $irsSubSet = Get-DiscoverySetting @{ Discovery = @{ State = 'WM'; IrsSubsections = @('3', '14') } }
+    Check 'IRS: subsections kept, trust dropped' ((@(ConvertFrom-IrsEoCsv $irsSub $irsSubSet) | ForEach-Object company) -join ', ') 'Example Hospital, Example Credit Union'
+    Check 'IRS: no subsection list keeps all'  (@(ConvertFrom-IrsEoCsv $irsSub $dSet).Count) 3
+    $irsDrift = try { $null = ConvertFrom-IrsEoCsv ("`"EIN`",`"NAME`",`"CITY`",`"ZIP`"`n`"1`",`"A`",`"B`",`"00012`"") $dSet; 'read' } catch { $_.Exception.Message }
+    Check 'IRS: column drift is loud'        $irsDrift 'IRS EO BMF : missing column(s) REVENUE_AMT, NTEE_CD'
+
+    $foicu = @'
+"CU_NUMBER","CYCLE_DATE","CU_NAME","CITY","STATE","ZIP_CODE"
+101,6/30/2026 0:00:00,"HARBORVIEW EXAMPLE","Harborview","WM","00012"
+102,6/30/2026 0:00:00,"TINY EXAMPLE","Harborview","WM","00012"
+103,6/30/2026 0:00:00,"OTHER STATE EXAMPLE","Elsewhere","ZZ","00199"
+'@
+    $fs220 = @'
+"CU_NUMBER","CYCLE_DATE","ACCT_007","ACCT_010"
+101,6/30/2026 0:00:00,1,2500000000
+102,6/30/2026 0:00:00,1,5000000
+103,6/30/2026 0:00:00,1,9000000000
+'@
+    $cu = @(ConvertFrom-NcuaCallReport $foicu $fs220 $dSet)
+    Check 'NCUA: state and asset floor'      (($cu | ForEach-Object company) -join ', ') 'Harborview Example Credit Union'
+    Check 'NCUA: ACCT_010 as assets'         ('{0} {1} {2}' -f $cu[0].size_measure, $cu[0].size_value, $cu[0].industry) 'assets 2500000000 credit union'
+    $cuKeep = @(ConvertFrom-NcuaCallReport ($foicu -replace '"HARBORVIEW EXAMPLE"', '"HARBORVIEW EXAMPLE CU"') $fs220 $dSet)
+    Check 'NCUA: CU in the name kept as is'  $cuKeep[0].company 'Harborview Example Cu'
+    $ncuaDrift = try { $null = ConvertFrom-NcuaCallReport $foicu "`"CU_NUMBER`",`"ACCT_999`"`n101,1" $dSet; 'read' } catch { $_.Exception.Message }
+    Check 'NCUA: column drift is loud'       $ncuaDrift 'NCUA FS220 : missing column(s) ACCT_010'
+    $ncuaPage = '<a href="/files/publications/analysis/call-report-data-2025-12.zip">Q4</a> <a href="/files/publications/analysis/call-report-data-2026-06.zip">Q2</a> <a href="/files/publications/analysis/call-report-data-2026-03.zip">Q1</a>'
+    Check 'NCUA: newest zip by quarter'      (Get-NcuaNewestZip $ncuaPage) 'https://ncua.gov/files/publications/analysis/call-report-data-2026-06.zip'
+    Check 'NCUA: no zip link'                (Get-NcuaNewestZip '<p>none</p>') ''
+
+    $fdic = '{"meta":{"total":2},"data":[{"data":{"NAME":"Example Savings Bank","CITY":"Harborview","ZIP":"00012","ASSET":2500000,"WEBADDR":"www.examplesavings.example","CERT":"9001"}},{"data":{"NAME":"Tiny Example Bank","CITY":"Harborview","ZIP":"00012","ASSET":90000,"WEBADDR":"","CERT":"9002"}}]}'
+    $bk = @(ConvertFrom-FdicInstitution $fdic $dSet)
+    Check 'FDIC: asset floor'                $bk.Count 1
+    Check 'FDIC: thousands to dollars'       $bk[0].size_value 2500000000
+    Check 'FDIC: website gets https'         $bk[0].website 'https://www.examplesavings.example'
+
+    $loc = @(ConvertFrom-LocalEmployerCsv "company,website,city,zip`nHarborview Port Authority,,Harborview,00012`n,,,`n" 'gov.csv')
+    Check 'local CSV: blank company skipped' $loc.Count 1
+    Check 'local CSV: dataset names file'    $loc[0].source_dataset 'local: gov.csv'
+    $locDrift = try { $null = ConvertFrom-LocalEmployerCsv "name,city`nA,B" 'x.csv'; 'read' } catch { $_.Exception.Message }
+    Check 'local CSV: needs company'         $locDrift 'local CSV x.csv : missing column(s) company'
+
+    $m = @(Merge-EmployerRow @(
+        (New-EmployerRow -Company 'Example Medical Center' -Website '' -Industry 'health care' -Dataset 'IRS EO BMF' -SourceId '1' -City 'Harborview' -Zip '00012' -SizeMeasure 'revenue' -SizeValue 250000000 -Notes 'NTEE E220'),
+        (New-EmployerRow -Company 'EXAMPLE MEDICAL CENTER INC' -Website 'https://emc.example' -Industry 'health care' -Dataset 'local: x.csv' -SourceId '' -City 'Harborview' -Zip '00012' -SizeMeasure '' -SizeValue '' -Notes ''),
+        (New-EmployerRow -Company 'Example Savings Bank' -Website '' -Industry 'bank' -Dataset 'FDIC' -SourceId '9001' -City 'Harborview' -Zip '00012' -SizeMeasure 'assets' -SizeValue 2500000000 -Notes '')))
+    Check 'merge: one row per employer'      $m.Count 2
+    Check 'merge: larger row kept'           $m[0].source_dataset 'IRS EO BMF'
+    Check 'merge: website carried over'      $m[0].website 'https://emc.example'
+    Check 'merge: note names the other'      $m[0].notes 'NTEE E220; also in local: x.csv'
+
+    $rbAll = "User-agent: Examplebot`nUser-agent: Otherbot`nAllow: /`n`nUser-agent: *`nDisallow: /"
+    Check 'robots: named bots only, * blocked' (Test-RobotsAllowed $rbAll '/careers/example') $false
+    Check 'robots: bare CR line endings'     (Test-RobotsAllowed "User-agent: Examplebot`rAllow: /`r`rUser-agent: *`rDisallow: /" '/') $false
+    $rbMix = "User-agent: *`r`nAllow: /core/*.css`$`r`nDisallow: /core/`r`nDisallow: /search/`r`nDisallow: /*search=*"
+    Check 'robots: path not listed'          (Test-RobotsAllowed $rbMix '/pub/data/eo_wm.csv') $true
+    Check 'robots: disallowed prefix'        (Test-RobotsAllowed $rbMix '/search/thing') $false
+    Check 'robots: longer Allow wins'        (Test-RobotsAllowed $rbMix '/core/site.css') $true
+    Check 'robots: $ anchors the end'        (Test-RobotsAllowed $rbMix '/core/site.css?v=2') $false
+    Check 'robots: * inside a pattern'       (Test-RobotsAllowed $rbMix '/list?x=1&search=a') $false
+    Check 'robots: empty Disallow allows'    (Test-RobotsAllowed "User-agent: *`nDisallow:" '/anything') $true
+    Check 'robots: no file allows'           (Test-RobotsAllowed '' '/anything') $true
+}
+
 } catch {
     $fail++
     $stoppedBy = "suite stopped at line $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.Message)"

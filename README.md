@@ -39,7 +39,8 @@ That is what the test suite is for.
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs and company names into `Sources` entries you can paste. See [Finding new sources](#finding-new-sources). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 611 cases, no network. |
+| `Find-JobSweepEmployers.ps1` | ✅ | Employer discovery. Lists employers in your zone from public datasets, for the scout to work through. See [Finding employers](#finding-employers). |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 668 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -208,6 +209,39 @@ Good places to find URLs:
 - **Job alert lists.** Take the company **names** only. Most job sites' terms
   forbid automated scraping, and a name is all the scout needs.
 
+## Finding employers
+
+The scout needs a name or a URL to start from. `Find-JobSweepEmployers.ps1`
+supplies the names: it reads public, employer-level datasets for one state,
+keeps the employers above a size floor whose address is in your zone, and
+writes `Sweeps\employers-<date>.csv`, largest first.
+
+```powershell
+.\Find-JobSweepEmployers.ps1                      # every dataset in your profile
+.\Find-JobSweepEmployers.ps1 -Dataset IRS -IncludeOutOfZone -OutFile .\zone-check.csv
+```
+
+| Dataset | What it is | Size |
+|---|---|---|
+| IRS | Exempt Organizations Business Master File, the state extract | revenue |
+| NCUA | Credit union quarterly call report, the newest quarter | total assets |
+| FDIC | BankFind API, active banks headquartered in the state | total assets |
+| Local | Your own CSVs, for employers no dataset covers (public agencies, firms) | as you give it |
+
+The state, the zone (ZIP prefixes, ZIPs and cities, with exclusions) and the
+size floors live in the `Discovery` block of your local profile; the example
+profile documents each key. Columns: `company, website, industry,
+source_dataset, source_id, city, zip, size_measure, size_value, in_zone,
+already_in_profile, notes`. A dataset whose columns change fails loudly with
+the missing column named, and the others still run.
+
+It checks each site's robots.txt before every request and does not fetch a
+path that is disallowed; requests are a second apart and carry a descriptive
+User-Agent. It never writes to a profile. Datasets give a mailing address, so a
+large organisation can show the city of its head office rather than where you
+would work, and most rows have no website yet: treat the list as names to look
+up, not as sources.
+
 ## Profiles
 
 Profiles are **replace-by-key, not deep-merged**: a key present in a profile
@@ -247,7 +281,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1222  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1336  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -255,11 +289,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  611    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  611    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  668    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  668    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1222  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1336  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -298,6 +332,18 @@ decide what ships.
 
 ## Changelog
 
+- **1.10.0** (2026-11-19): employer discovery, `Find-JobSweepEmployers.ps1`.
+  - Reads three public datasets for one state: the IRS Exempt Organizations
+    Business Master File (nonprofits, by revenue), the NCUA quarterly call
+    report (credit unions, by total assets) and the FDIC BankFind API (banks,
+    by total assets). Your own CSVs add employers no dataset covers.
+  - Keeps employers above a size floor whose ZIP or city is in your zone, marks
+    the ones already in your profile, merges the same employer from two
+    datasets, and writes `Sweeps\employers-<date>.csv`.
+  - Robots.txt is read before every request (including files with bare CR line
+    endings) and a disallowed path is reported, not fetched.
+  - New `Discovery` profile key for the state, the zone and the size floors.
+  - 57 new regression cases (668).
 - **1.9.1** (2026-11-19): ADP employers on `workforcenow.cloud.adp.com`.
   - Some WorkforceNow employers live on ADP's `.cloud.` host, and the plain
     `workforcenow.adp.com` host answers 404 for them. An ADP source can now
