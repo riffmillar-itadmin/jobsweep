@@ -133,6 +133,11 @@ ClearanceScreen = 'check'
 #   NteeExclude       nonprofit NTEE codes or major groups to drop ('X' religion)
 #   IrsSubsections    501(c) subsections to keep ('03' charities); benefit trusts
 #                     and union funds report big revenue but employ few people
+#   NameExclude       regular expressions matched against the employer name,
+#                     any case; a match is dropped from the list. For fundraising
+#                     arms, grantmakers and pass-through funds that employ few
+#                     people, and for units that hire through a parent's board.
+#                     Anchor a pattern (^...$) to drop one name, not a family.
 #   ExtraCsv          your own CSVs (company, website, industry, city, zip) for
 #                     employers no dataset covers, such as public agencies
 Discovery = @{
@@ -147,6 +152,7 @@ Discovery = @{
     MinBankAssets        = 500000000
     NteeExclude          = @('X')
     IrsSubsections       = @('03')
+    NameExclude          = @('^(the )?harborview community fund$', 'hospital foundation$')
     # ExtraCsv           = @('%USERPROFILE%\Documents\JobSweep\employers-extra.csv')
 }
 

@@ -23,8 +23,8 @@
             covers. Columns: company, website, industry, city, zip, and
             optionally size_measure, size_value, notes.
 
-    The zone, the state and the size thresholds live in the Discovery block of
-    your local profile, never in this script. Every request is checked against
+    The zone, the state, the size thresholds and the NameExclude patterns live
+    in the Discovery block of your local profile, never in this script. Every request is checked against
     the site's robots.txt first; a disallowed path is reported as
     "blocked by robots" and not fetched. Requests are spaced by -ThrottleMs and
     carry a descriptive User-Agent.
@@ -99,6 +99,7 @@ function Get-DiscoverySetting {
         MinBankAssets        = [long](& $get 'MinBankAssets' 500000000)
         NteeExclude          = @(& $get 'NteeExclude' @())
         IrsSubsections       = @(& $get 'IrsSubsections' @())
+        NameExclude          = @(& $get 'NameExclude' @() | Where-Object { $_ })
         Datasets             = @(& $get 'Datasets' @('IRS', 'NCUA', 'FDIC', 'Local'))
         ExtraCsv             = @(& $get 'ExtraCsv' @())
     }
@@ -183,6 +184,16 @@ function Assert-DatasetColumn {
     param([string]$Dataset, [string[]]$Have, [string[]]$Need)
     $miss = @($Need | Where-Object { $Have -notcontains $_ })
     if ($miss.Count) { throw "$Dataset : missing column(s) $($miss -join ', ')" }
+}
+
+function Get-EmployerNameExclusion {
+    <# The first NameExclude pattern that matches the employer name, or ''.
+       Patterns are regular expressions, matched without regard to case. #>
+    param([string]$Name, $Setting)
+    foreach ($p in @($Setting.NameExclude)) {
+        if ($p -and $Name -match "(?i)$p") { return [string]$p }
+    }
+    return ''
 }
 
 function New-EmployerRow {
@@ -425,6 +436,9 @@ if (-not $ProfilePath) {
 }
 $Config = Merge-JobSweepProfile -Defaults $Config -ProfilePath $ProfilePath
 $set = Get-DiscoverySetting $Config
+foreach ($p in @($set.NameExclude)) {
+    try { $null = [regex]::new([string]$p) } catch { throw "Discovery.NameExclude: '$p' is not a valid regular expression: $($_.Exception.Message)" }
+}
 if (-not $OutputRoot) {
     $OutputRoot = if ($Config.ContainsKey('OutputRoot') -and $Config.OutputRoot) {
         [Environment]::ExpandEnvironmentVariables([string]$Config.OutputRoot)
@@ -500,6 +514,14 @@ foreach ($ds in @('IRS', 'NCUA', 'FDIC', 'Local')) {
 }
 
 $all = @(Merge-EmployerRow $all)
+$nameDropped = 0
+$kept = @()
+foreach ($r in $all) {
+    $hit = Get-EmployerNameExclusion $r.company $set
+    if ($hit) { $nameDropped++; Write-Host ("  name excluded: {0}  ({1})" -f $r.company, $hit) -ForegroundColor DarkGray; continue }
+    $kept += $r
+}
+$all = @($kept)
 foreach ($r in $all) {
     $r.in_zone = [bool](Test-EmployerInZone $r.zip $r.city $set)
     $r.already_in_profile = Test-EmployerInProfile $r.company $profileKeys
@@ -514,7 +536,7 @@ $write | Export-Csv -LiteralPath $OutFile @csvArgs
 Write-Host ("`nWrote {0} rows to {1}" -f $write.Count, $OutFile)
 
 $inProfile = @($inZone | Where-Object { $_.already_in_profile }).Count
-$summary.Add([pscustomobject]@{ Dataset = 'All (merged)'; Status = 'INFO'; AboveSize = $all.Count; Note = ("{0} in zone, {1} of those already in profile, {2} new" -f $inZone.Count, $inProfile, ($inZone.Count - $inProfile)) })
+$summary.Add([pscustomobject]@{ Dataset = 'All (merged)'; Status = 'INFO'; AboveSize = $all.Count; Note = ("{0} in zone, {1} of those already in profile, {2} new; {3} dropped by NameExclude" -f $inZone.Count, $inProfile, ($inZone.Count - $inProfile), $nameDropped) })
 
 $sPass = @($summary | Where-Object Status -eq 'PASS').Count
 $sFail = @($summary | Where-Object Status -eq 'FAIL').Count

@@ -40,7 +40,7 @@ That is what the test suite is for.
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs and company names into `Sources` entries you can paste. See [Finding new sources](#finding-new-sources). |
 | `Find-JobSweepEmployers.ps1` | ✅ | Employer discovery. Lists employers in your zone from public datasets, for the scout to work through. See [Finding employers](#finding-employers). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 668 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 677 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -235,6 +235,13 @@ source_dataset, source_id, city, zip, size_measure, size_value, in_zone,
 already_in_profile, notes`. A dataset whose columns change fails loudly with
 the missing column named, and the others still run.
 
+Some large names are not employers you can apply to: fundraising foundations,
+grantmakers, pass-through funds, and units that hire through a parent's board.
+`NameExclude` in the `Discovery` block takes regular expressions matched against
+the employer name, in any case. Each match is dropped and printed as
+`name excluded: <name> (<pattern>)`, and the summary counts them. Anchor a
+pattern (`^...$`) to drop one name rather than a family of names.
+
 It checks each site's robots.txt before every request and does not fetch a
 path that is disallowed; requests are a second apart and carry a descriptive
 User-Agent. It never writes to a profile. Datasets give a mailing address, so a
@@ -281,7 +288,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1336  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1354  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -289,11 +296,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  668    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  668    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  677    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  677    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1336  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1354  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -332,6 +339,13 @@ decide what ships.
 
 ## Changelog
 
+- **1.10.1** (2026-11-19): `Discovery.NameExclude` for the employer list.
+  - Regular expressions matched against the employer name, in any case. Each
+    match is dropped, printed as `name excluded: <name> (<pattern>)` and
+    counted in the summary, so nothing disappears silently.
+  - An invalid pattern stops the run before any download, naming the pattern.
+  - The example profile documents the key with two fictional patterns.
+  - 9 new regression cases (677).
 - **1.10.0** (2026-11-19): employer discovery, `Find-JobSweepEmployers.ps1`.
   - Reads three public datasets for one state: the IRS Exempt Organizations
     Business Master File (nonprofits, by revenue), the NCUA quarterly call
