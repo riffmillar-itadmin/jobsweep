@@ -345,6 +345,13 @@ Check 'Desktop Client Support KEPT'     (Test-TitleMatch 'Client Support Special
 Check 'Clinical Apps Support KEPT'      (Test-TitleMatch 'Clinical Applications Support Specialist').Ok        $true
 Check 'Tech Support Spec still KEPT'    (Test-TitleMatch 'Tech Support Specialist I').Ok                       $true
 Check 'Service Desk Support Spec KEPT'  (Test-TitleMatch 'Service Desk Support Specialist').Ok                 $true
+# Added 2026-11-20 (1.12.1): two more from the first sweep of the finder's boards.
+Check 'Housing Support Spec DROPS'      (Test-TitleMatch 'Housing Support Specialist').Ok                      $false
+Check 'NICU Support Spec DROPS'         (Test-TitleMatch 'NICU Support Specialist (Per Diem / Day)').Ok        $false
+Check 'NICU drop names the rule'        ((Test-TitleMatch 'NICU Support Specialist').Reason -like '*nicu*')    $true
+# A university housing department's IT roles stay.
+Check 'Housing dept IT Support KEPT'    (Test-TitleMatch 'IT Support Specialist, Housing & Food Services').Ok  $true
+Check 'Housing dept Systems Admin KEPT' (Test-TitleMatch 'Systems Administrator - Housing and Food Services').Ok $true
 
 Write-Host "`n-- TITLE: Microsoft customer support engineers, added 2026-11-18 (1.8.3) --"
 # Three of these reached the candidate list on 'support engineer' on 2026-11-18.
