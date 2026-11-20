@@ -327,6 +327,25 @@ Check 'Well-being drop names the rule' ((Test-TitleMatch 'Well-being Support Spe
 Check 'IT Support Specialist still KEPT' (Test-TitleMatch 'IT Support Specialist II').Ok                       $true
 Check 'Desktop Support Spec still KEPT'  (Test-TitleMatch 'Desktop Support Specialist').Ok                     $true
 
+Write-Host "`n-- TITLE: client-care support specialists, added 2026-11-20 (1.11.1) --"
+# The first dry run of the finder's new boards put these on the candidate list
+# on 'support specialist'. Each is a human-services or branch role.
+Check 'Crisis Support Spec DROPS'       (Test-TitleMatch 'Crisis Support Specialist (Day & Swing Shifts)').Ok  $false
+Check 'Client Support Spec DROPS'       (Test-TitleMatch 'Client Support Specialist (On-Call)').Ok             $false
+Check 'Family Support Spec DROPS'       (Test-TitleMatch 'Family Support Specialist').Ok                       $false
+Check 'Resident Support Spec DROPS'     (Test-TitleMatch 'Bilingual Resident Support Specialist').Ok           $false
+Check 'Clinical Support Spec DROPS'     (Test-TitleMatch 'Clinical Support Specialist - Day').Ok               $false
+Check 'Member Support Spec DROPS'       (Test-TitleMatch 'Member Support Specialist (Harborview Branch)').Ok   $false
+Check 'Crisis drop names the rule'      ((Test-TitleMatch 'Crisis Support Specialist').Reason -like '*crisis*') $true
+# Client support with an IT word in the title is a help-desk role and stays.
+Check 'IT Client Support Spec KEPT'     (Test-TitleMatch 'IT Client Support Specialist').Ok                    $true
+Check 'Technical Client Support KEPT'   (Test-TitleMatch 'Technical Client Support Specialist II').Ok          $true
+Check 'Desktop Client Support KEPT'     (Test-TitleMatch 'Client Support Specialist - Desktop').Ok             $true
+# Clinical applications support is EHR work and is not a clinical support role.
+Check 'Clinical Apps Support KEPT'      (Test-TitleMatch 'Clinical Applications Support Specialist').Ok        $true
+Check 'Tech Support Spec still KEPT'    (Test-TitleMatch 'Tech Support Specialist I').Ok                       $true
+Check 'Service Desk Support Spec KEPT'  (Test-TitleMatch 'Service Desk Support Specialist').Ok                 $true
+
 Write-Host "`n-- TITLE: Microsoft customer support engineers, added 2026-11-18 (1.8.3) --"
 # Three of these reached the candidate list on 'support engineer' on 2026-11-18.
 # They are Microsoft's Customer Service & Support organisation: customer-facing.

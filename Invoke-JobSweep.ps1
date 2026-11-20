@@ -163,6 +163,9 @@
     1.11.0 (2026-11-19): careers-page finder. Find-JobSweepSources.ps1
     -EmployerCsv finds each employer's careers page and the applicant-tracking
     system behind it; the scout also reads legacy Dayforce CandidatePortal URLs.
+    1.11.1 (2026-11-20): client-care support titles are excluded (crisis,
+    client, family, resident, clinical and member support specialists). They had
+    matched 'support specialist'. Client support with IT in the title is kept.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -195,7 +198,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.11.0'
+$JobSweepVersion = '1.11.1'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo

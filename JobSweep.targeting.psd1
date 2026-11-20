@@ -108,6 +108,17 @@ TitleExclude = @(
     # the candidate list on 'support specialist'. Well-being and wellness titles in
     # past sweeps were patient care, staff wellness or benefits, never IT.
     'well[- ]?being','wellness',
+    # CLIENT CARE, added 2026-11-20 (1.11.1). The first dry run of the boards the
+    # careers-page finder found put social-service roles on the candidate list on
+    # 'support specialist': crisis, client, family, resident and clinical support
+    # specialists at human-services agencies. A credit union's "Member Support
+    # Specialist" is a branch role. Replayed across 13,842 titles from past
+    # screened runs: these drop no IT title. 'client support specialist' stays
+    # when the title also says IT, technical, desktop, computer or systems, so a
+    # managed-service provider's "IT Client Support Specialist" is kept.
+    '\bcrisis\b','family support','resident support','clinical support specialist',
+    'member support specialist',
+    '^(?!.*\b(it|technical|desktop|computer|systems?)\b).*client support specialist',
     # Defense operations research -- Bluehawk's three ORSA reqs matched
     # 'systems analyst' and are a different profession entirely.
     'operations research',
