@@ -30,7 +30,7 @@
 
 .PARAMETER Source
     Run only one provider: Greenhouse, Lever, Workday, Microsoft, ADP, iCIMS,
-    UltiPro, Dayforce, Rippling or Paylocity. Omit for all.
+    UltiPro, Dayforce, Rippling, Paylocity or ApplicantPro. Omit for all.
 
 .PARAMETER DryRun
     Fetch, screen and report, but do NOT update the seen-state file. Safe to re-run.
@@ -150,6 +150,10 @@
     1.8.5 (2026-11-19): aerospace engineering titles are excluded (avionics,
     spacecraft, propulsion, fluid, RF, GN&C, safety and reliability and others).
     They had matched 'systems engineer'.
+    1.9.0 (2026-11-19): ApplicantPro provider (<tenant>.applicantpro.com, now
+    isolved Talent Acquisition) -- the job list as JSON from the board's own
+    /core/jobs/<domainId> call, with the sitemap and each posting's JobPosting
+    block as failover; description from each survivor's JobPosting block.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -160,7 +164,7 @@ param(
     # Resolved after the profiles load: this parameter, else OutputRoot in a
     # profile, else the folder this script lives in.
     [string] $OutputRoot,
-    [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro','Dayforce','Rippling','Paylocity')]
+    [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro','Dayforce','Rippling','Paylocity','ApplicantPro')]
     [string] $Source,
     [switch] $DryRun,
     [switch] $SkipDetail,
@@ -182,7 +186,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.8.5'
+$JobSweepVersion = '1.9.0'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -2359,6 +2363,222 @@ function Add-PaylocityDetail {
     Start-Sleep -Milliseconds $script:Throttle
 }
 
+# ---- ApplicantPro -----------------------------------------------------------
+# <tenant>.applicantpro.com, added 1.9.0. ApplicantPro (now sold as isolved
+# Talent Acquisition) builds its /jobs/ page in the browser, so that page's HTML
+# holds no postings. It does hold the board's domain id, and the page's own
+# script asks /core/jobs/<domainId>?getParams={} for the list as JSON: id, title,
+# city, state, workplace type, pay range and start date for every posting. Each
+# posting's page, /jobs/<id>.html, carries a schema.org JobPosting block with the
+# full description, which the detail pass reads.
+#
+# Failover: when the list does not answer, the tenant's sitemap,
+# /job_site_map.xml, names every open posting, and each posting's page gives its
+# title, place, date and pay from the same JobPosting block. That is one request
+# per posting, so it is slower, but the board is not lost.
+
+function Get-ApplicantProDomainId {
+    <# The board's domain id from its /jobs/ page, or '' when the page has none.
+       The page also carries rootDomainId and root_domain_id (the platform's own),
+       so both patterns match the exact name only. Pure. #>
+    param([string]$Html)
+    $m = [regex]::Match([string]$Html, '(?<![\w])domainId\s*:\s*"?(\d+)')
+    if ($m.Success) { return $m.Groups[1].Value }
+    $m = [regex]::Match([string]$Html, '[{,]\s*"domain_id"\s*:\s*"?(\d+)')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return ''
+}
+
+function ConvertTo-ApplicantProPay {
+    <# A pay range from a low, a high and a unit (per hour, per year, HOUR,
+       YEAR), in the same form as the other providers. '' for any other unit, such
+       as the "other" on a talent-network placeholder. Pure. #>
+    param($Min, $Max, [string]$Unit, [string]$Currency = 'USD')
+    $freq = ''
+    if ($Unit -match '(?i)hour') { $freq = 'HOUR' } elseif ($Unit -match '(?i)year|annual') { $freq = 'YEAR' }
+    if (-not $freq) { return '' }
+    $lo = 0.0; $hi = 0.0
+    $ci = [Globalization.CultureInfo]::InvariantCulture
+    $ns = [Globalization.NumberStyles]::Float
+    if (-not [double]::TryParse([string]$Min, $ns, $ci, [ref]$lo)) { return '' }
+    if (-not [double]::TryParse([string]$Max, $ns, $ci, [ref]$hi)) { $hi = $lo }
+    return (Get-RipplingPay @([pscustomobject]@{ rangeStart = $lo; rangeEnd = $hi; currency = $Currency; frequency = $freq }))
+}
+
+function ConvertFrom-ApplicantProJob {
+    <# One data.jobs[] entry reduced to @{ Id; Title; Location; Posted; Pay; Url }.
+       Returns $null for a row with no id or no title. Location is "City, ST"; a
+       "Fully remote" workplace type puts Remote in front. "Work from home
+       flexibility" is a hybrid arrangement, so it does not. Posted is the start
+       date as yyyy-MM-dd. Pure. #>
+    param($Job)
+    $id = [string](Get-JsonValue $Job 'id')
+    $title = [string](Get-JsonValue $Job 'title')
+    if (-not $id -or [string]::IsNullOrWhiteSpace($title)) { return $null }
+    $city = [string](Get-JsonValue $Job 'city')
+    $st = [string](Get-JsonValue $Job 'abbreviation')
+    if (-not $st) { $st = [string](Get-JsonValue $Job 'stateName') }
+    $locs = @()
+    if ($city -and $st) { $locs += "$city, $st" } elseif ($city) { $locs += $city } elseif ($st) { $locs += $st }
+    if (-not $locs) {
+        $jl = [string](Get-JsonValue $Job 'jobLocation')
+        if ($jl) { $locs += $jl.Trim() }
+    }
+    if ([string](Get-JsonValue $Job 'workplaceType') -match '(?i)fully remote|^\s*remote\b') { $locs = @('Remote') + $locs }
+    $posted = ''
+    $d = [datetime]::MinValue
+    $ref = [string](Get-JsonValue $Job 'startDateRef')
+    if ([datetime]::TryParseExact($ref, 'MMM d, yyyy', [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$d)) {
+        $posted = $d.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    $url = [string](Get-JsonValue $Job 'jobUrl')
+    return @{
+        Id = $id; Title = $title.Trim(); Location = ($locs -join ' | '); Posted = $posted; Url = $url
+        Pay = (ConvertTo-ApplicantProPay (Get-JsonValue $Job 'minSalary') (Get-JsonValue $Job 'maxSalary') ([string](Get-JsonValue $Job 'payTypeFrame')))
+    }
+}
+
+function ConvertFrom-ApplicantProDetail {
+    <# A posting page reduced to @{ Title; Content; Location; Posted; Pay } from
+       its schema.org JobPosting block, or $null when the page has none. Pure. #>
+    param([string]$Html)
+    foreach ($m in [regex]::Matches([string]$Html, '(?is)<script[^>]+application/ld\+json[^>]*>(.*?)</script>')) {
+        $j = $null
+        try { $j = $m.Groups[1].Value | ConvertFrom-Json }
+        catch { Write-Verbose "ApplicantPro: an ld+json block did not parse: $($_.Exception.Message)"; continue }
+        foreach ($o in @($j)) {
+            if ([string](Get-JsonValue $o '@type') -ne 'JobPosting') { continue }
+            $addr = Get-JsonValue (Get-JsonValue $o 'jobLocation') 'address'
+            $city = [string](Get-JsonValue $addr 'addressLocality'); $st = [string](Get-JsonValue $addr 'addressRegion')
+            $locs = @()
+            if ($city -and $st) { $locs += "$city, $st" } elseif ($city) { $locs += $city } elseif ($st) { $locs += $st }
+            if ([string](Get-JsonValue $o 'jobLocationType') -match '(?i)telecommute') { $locs = @('Remote') + $locs }
+            # The date the employer gave, as it gave it: a value PowerShell 7 parsed
+            # into a DateTime is formatted as is, not moved to UTC first.
+            $dp = Get-JsonValue $o 'datePosted'
+            $posted = ''
+            if ($dp -is [datetime]) { $posted = $dp.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) }
+            elseif ([string]$dp -match '^(\d{4}-\d{2}-\d{2})') { $posted = $Matches[1] }
+            $pay = ''
+            $bs = Get-JsonValue $o 'baseSalary'
+            $v = Get-JsonValue $bs 'value'
+            if ($v) {
+                $cur = [string](Get-JsonValue $bs 'currency'); if (-not $cur) { $cur = 'USD' }
+                $lo = Get-JsonValue $v 'minValue'; $hi = Get-JsonValue $v 'maxValue'
+                if ($null -eq $lo) { $lo = Get-JsonValue $v 'value' }
+                $pay = ConvertTo-ApplicantProPay $lo $hi ([string](Get-JsonValue $v 'unitText')) $cur
+            }
+            return @{
+                Title = ([string](Get-JsonValue $o 'title')).Trim()
+                Content = (Convert-HtmlToText ([string](Get-JsonValue $o 'description')))
+                Location = ($locs -join ' | '); Posted = $posted; Pay = $pay
+            }
+        }
+    }
+    return $null
+}
+
+function Get-ApplicantProSitemapId {
+    <# The posting ids a tenant's job_site_map.xml names, in order, once each.
+       The entry for the /jobs/ page itself has no id and is left out. Pure. #>
+    param([string]$Xml)
+    $ids = @()
+    foreach ($m in [regex]::Matches([string]$Xml, '<loc>[^<]*?/jobs/(\d+)(?:\.html)?\s*</loc>')) {
+        if ($ids -notcontains $m.Groups[1].Value) { $ids += $m.Groups[1].Value }
+    }
+    return @($ids)
+}
+
+function Get-ApplicantProJobs {
+    param($Src)
+    $tenant = ([string]$Src.Tenant).Trim().ToLower()
+    $base = "https://$tenant.applicantpro.com"
+    $rows = @()
+    $how = ''
+    $noTitle = 0
+    try {
+        $dom = ''
+        if ($Src.ContainsKey('DomainId') -and $Src.DomainId) { $dom = [string]$Src.DomainId }
+        else { $dom = Get-ApplicantProDomainId (Invoke-Html "$base/jobs/") }
+        if (-not $dom) { throw "no domain id on $base/jobs/ -- the page layout may have changed" }
+        $r = Invoke-Json -Uri "$base/core/jobs/$($dom)?getParams=%7B%7D" -Label "$($Src.Company) ApplicantPro list"
+        if (-not (Get-JsonValue $r 'success')) { throw "the list answered without success: $([string](Get-JsonValue $r 'message'))" }
+        $data = Get-JsonValue $r 'data'
+        if ($null -eq $data -or $data.PSObject.Properties.Name -notcontains 'jobs') { throw 'the list answer has no data.jobs' }
+        foreach ($j in @(Get-JsonValue $data 'jobs')) {
+            if ($null -eq $j) { continue }
+            $f = ConvertFrom-ApplicantProJob $j
+            if ($null -eq $f) { $noTitle++; continue }
+            $f['Content'] = ''
+            $rows += ,$f
+        }
+        $count = Get-JsonValue $data 'jobCount'
+        if ($null -ne $count -and [int]$count -gt ($rows.Count + $noTitle)) {
+            Write-Log ("   ApplicantPro {0}: the board says {1} postings but the list gave {2}" -f $Src.Company, $count, ($rows.Count + $noTitle)) 'WARN'
+        }
+        $how = "JSON list, domain $dom"
+    } catch {
+        Write-Log "   ApplicantPro $($Src.Company): list failed ($($_.Exception.Message)); reading the sitemap and posting pages instead" 'WARN'
+        $rows = @(); $noTitle = 0
+        $ids = @(Get-ApplicantProSitemapId (Invoke-Html "$base/job_site_map.xml"))
+        if ($ids.Count -eq 0) { Write-Log "   ApplicantPro $($Src.Company): the sitemap names no postings either" 'WARN' }
+        $failed = 0
+        foreach ($id in @($ids | Select-Object -First 200)) {
+            try {
+                $d = ConvertFrom-ApplicantProDetail (Invoke-Html "$base/jobs/$id.html")
+                if ($null -eq $d -or -not $d.Title) { $noTitle++ }
+                else {
+                    $rows += ,@{ Id = $id; Title = $d.Title; Location = $d.Location; Posted = $d.Posted
+                                 Pay = $d.Pay; Url = "$base/jobs/$id"; Content = $d.Content }
+                }
+            } catch {
+                $failed++
+                Write-Log "   ApplicantPro $($Src.Company): posting $id did not load: $($_.Exception.Message)" 'WARN'
+            }
+            Start-Sleep -Milliseconds $script:Throttle
+        }
+        $how = "sitemap and posting pages (failover), $($ids.Count) listed"
+        if ($failed -gt 0) { $how += ", $failed did not load" }
+    }
+    $out = @()
+    foreach ($f in $rows) {
+        $url = if ($f.Url) { $f.Url } else { "$base/jobs/$($f.Id)" }
+        $p = New-Posting -Source 'ApplicantPro' -Company $Src.Company -Title $f.Title `
+                 -Location $f.Location -Url $url -ReqId $f.Id -Posted $f.Posted -Content $f.Content
+        # The employer filled the pay fields in, so they win over pay found in the text.
+        if ($f.Pay) { $p.Pay = $f.Pay }
+        $out += ($p | Add-Member -NotePropertyName DetailPath -NotePropertyValue "$base/jobs/$($f.Id).html" -PassThru |
+                      Add-Member -NotePropertyName ListPay -NotePropertyValue ([string]$f.Pay) -PassThru)
+    }
+    if ($noTitle -gt 0) { Write-Log "   ApplicantPro $($Src.Company): skipped $noTitle row(s) with no id or title" 'WARN' }
+    Write-Log ("   ApplicantPro {0}: {1} postings -- {2}" -f $Src.Company, $out.Count, $how)
+    return $out
+}
+
+function Add-ApplicantProDetail {
+    <# Full description from the posting's JobPosting block. Pay: the list's pay
+       fields first, then the block's baseSalary, then pay found in the text. #>
+    param($Posting)
+    try {
+        $d = ConvertFrom-ApplicantProDetail (Invoke-Html $Posting.DetailPath)
+        if ($null -eq $d) {
+            Write-Log "  detail for $($Posting.Company) / $($Posting.Title) had no JobPosting block" 'WARN'
+        } else {
+            $Posting.Content = $d.Content
+            $pay = [string]$Posting.ListPay
+            if (-not $pay) { $pay = $d.Pay }
+            if (-not $pay) { $pay = Get-PayRange $d.Content }
+            $Posting.Pay          = $pay
+            $Posting.Degree       = Get-DegreeFlag $Posting.Content
+            $Posting.NeedsLicence = [bool](Test-LicenceRequired $Posting.Content)
+            if (-not $Posting.Posted -and $d.Posted) { $Posting.Posted = $d.Posted }
+        }
+    } catch {
+        Write-Log "  detail fetch failed for $($Posting.Company) / $($Posting.Title): $($_.Exception.Message)" 'WARN'
+    }
+    Start-Sleep -Milliseconds $script:Throttle
+}
+
 # ============================================================================
 #  MAIN
 # ============================================================================
@@ -2463,6 +2683,7 @@ foreach ($src in $sources) {
             'Dayforce'   { $got = @(Get-DayforceJobs   $src) }
             'Rippling'   { $got = @(Get-RipplingJobs   $src) }
             'Paylocity'  { $got = @(Get-PaylocityJobs  $src) }
+            'ApplicantPro' { $got = @(Get-ApplicantProJobs $src) }
         }
         Write-Log "   $($got.Count) postings"
         $all += $got
@@ -2518,6 +2739,7 @@ if (-not $SkipDetail) {
                 'Dayforce'  { Add-DayforceDetail  $p }
                 'Rippling'  { Add-RipplingDetail  $p }
                 'Paylocity' { Add-PaylocityDetail $p }
+                'ApplicantPro' { Add-ApplicantProDetail $p }
             }
         }
     }

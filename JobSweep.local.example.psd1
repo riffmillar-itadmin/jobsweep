@@ -130,6 +130,7 @@ ClearanceScreen = 'check'
 #   Dayforce    jobs.dayforcehcm.com/en-US/<Namespace>/<Board>/jobs -- both in the URL
 #   Rippling    ats.rippling.com/<Board>/jobs           -- Board is in the URL, case and all
 #   Paylocity   recruiting.paylocity.com/recruiting/jobs/All/<BoardId> -- the GUID in the board URL
+#   ApplicantPro <Tenant>.applicantpro.com/jobs/          -- Tenant is the subdomain
 #
 # Start with five or six employers you would actually work for, confirm the
 # sweep returns their postings, then grow the list.
@@ -169,6 +170,10 @@ Sources = @(
     # A posting URL (/Recruiting/Jobs/Details/<id>) does not name the board; open the
     # employer's careers page or the posting's "view all jobs" link to find it.
     @{ Provider='Paylocity';  Company='Example Clinic';      BoardId='00000000-0000-0000-0000-000000000000' }
+
+    # ---- ApplicantPro (isolved Talent Acquisition): <Tenant>.applicantpro.com/core/jobs/<domainId>
+    # The collector reads the domain id off the /jobs/ page; DomainId='<n>' pins it if needed.
+    @{ Provider='ApplicantPro'; Company='Example Credit Union'; Tenant='examplecu' }
 )
 
 }
