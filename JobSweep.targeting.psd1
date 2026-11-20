@@ -135,7 +135,23 @@ TitleExclude = @(
     # issues, a customer-facing lane. Three reached the candidate list on
     # 'support engineer' in one run. Scoped to that title in that discipline:
     # the same discipline tag also carries data analyst and media systems posts.
-    'technical support engineer.*\[technical support engineering\]'
+    'technical support engineer.*\[technical support engineering\]',
+    # AEROSPACE, added 2026-11-19 (1.8.5). 'systems engineer' is an IT title and
+    # an aerospace title. A space company's board put spacecraft, avionics, fluid
+    # and RF engineers on the candidate list every week. Replayed across 13,451
+    # titles from 37 screened runs: every title-passing row these drop is
+    # aerospace or hardware engineering, and none is IT.
+    # Left out on purpose, each because it dropped a real IT title:
+    #   'launch'        "Launch Communications IT Support Analyst"
+    #   'lunar' (bare)  "Lunar Systems Administrator", so lunar needs 'engineer'
+    #   'verification'  identity verification roles, and every aerospace
+    #                   verification title is already caught by another word
+    # 'safety and reliability' is spelled out so it can never touch 'site reliability'.
+    'aerospace','avionics','spacecraft','space vehicle','propulsion','\bfluids? systems',
+    '\bgn&?c\b','guidance,? navigation','safety (and|&) reliability','\brf\b',
+    'electrical (power|systems?|engineer)','embedded systems','electromechanical',
+    'turbomachinery','\bautonomy\b','mission systems','ground systems','payload',
+    '\borbital\b','lunar.*engineer|engineer.*lunar'
 )
 
 # ---- LOCATION, restructured 2026-09-10 when national remote came back in scope.
