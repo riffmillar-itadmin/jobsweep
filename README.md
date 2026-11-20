@@ -39,7 +39,7 @@ That is what the test suite is for.
 | `JobSweep.targeting.example.psd1` | ✅ | A simpler starting point if you are retargeting the sweep. |
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs and company names into `Sources` entries you can paste. See [Finding new sources](#finding-new-sources). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 522 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 584 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -173,7 +173,7 @@ one.
 ## Supported providers
 
 Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce, Rippling,
-Paylocity, and the Microsoft careers API. `JobSweep.local.example.psd1` documents where to find the token,
+Paylocity, ApplicantPro (isolved Talent Acquisition), and the Microsoft careers API. `JobSweep.local.example.psd1` documents where to find the token,
 tenant or board ID for each.
 
 ## Finding new sources
@@ -192,10 +192,11 @@ slug from a name and probes Greenhouse, Lever, Dayforce and Rippling. It checks 
 board answers, counts its postings and the titles that pass your title screen,
 skips what your profile already has, and prints `@{ Provider=... }` lines to
 paste into `Sources`. It never writes to a profile. A name-based hit is a guess,
-so open the board before you add it. Workday, iCIMS, UltiPro, ADP and Paylocity
+so open the board before you add it. Workday, iCIMS, UltiPro, ADP, Paylocity and ApplicantPro
 need a URL; for Paylocity it is the board URL with the GUID in it
 (`recruiting.paylocity.com/recruiting/jobs/All/<GUID>`), since a posting URL
-does not name its board.
+does not name its board. An ApplicantPro URL names its tenant in the host
+(`<tenant>.applicantpro.com`).
 
 Good places to find URLs:
 
@@ -245,7 +246,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1044  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1168  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -253,11 +254,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  522    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  522    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  584    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  584    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1044  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1168  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -296,6 +297,23 @@ decide what ships.
 
 ## Changelog
 
+- **1.9.0** (2026-11-19): an ApplicantPro provider (`<tenant>.applicantpro.com`,
+  now sold as isolved Talent Acquisition).
+  - The board's `/jobs/` page is built in the browser, so its HTML holds no
+    postings. It does hold the board's domain id, and the collector asks
+    `/core/jobs/<domainId>` for the list as JSON, the same call the page makes.
+    The list gives title, city, state, workplace type, pay range and start date.
+  - Each posting's own page carries a schema.org JobPosting block, which the
+    detail pass reads for the full description. The pay range the employer
+    filled in wins over pay found in the text.
+  - Failover: when the list does not answer, the tenant's sitemap names every
+    open posting, and each posting's page gives its title, place, date and pay.
+    It costs one request per posting, but the board is not lost.
+  - "Fully remote" postings are marked Remote; "Work from home flexibility" is
+    hybrid and keeps its city.
+  - The scout reads ApplicantPro URLs and probes them. Profile key: `Tenant`
+    (the subdomain); `DomainId` is optional.
+  - 62 new regression cases (584).
 - **1.8.5** (2026-11-19): aerospace engineering titles are excluded. A space
   company's board put avionics, spacecraft, fluid, RF and similar engineers on
   the candidate list on `systems engineer` every week. Replayed against 37

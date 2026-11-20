@@ -10,7 +10,7 @@
 
       1. works out the provider and its keys from a careers URL
          (Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce,
-         Rippling, Paylocity)
+         Rippling, Paylocity, ApplicantPro)
       2. or, given only a company name, guesses the slug and probes the providers
          that can be probed by name (Greenhouse, Lever, Dayforce, Rippling)
       3. checks that the board answers, counts its postings, and counts the titles
@@ -162,6 +162,16 @@ function ConvertFrom-CareersUrl {
         if ($h -ne 'recruiting.paylocity.com') { $e['PlcHost'] = "https://$h" }
         return $e
     }
+
+    # ApplicantPro: the tenant is the subdomain. The platform's own hosts are
+    # not tenants. A www.applicantpro.com/openings/<tenant>/ link (the sitemap's
+    # form) names the tenant in its path.
+    $m = [regex]::Match($u, '(?i)^https?://(?:www\.)?applicantpro\.com/openings/([a-z0-9-]+)')
+    if ($m.Success) { return @{ Provider = 'ApplicantPro'; Tenant = $m.Groups[1].Value.ToLower() } }
+    $m = [regex]::Match($u, '(?i)^https?://([a-z0-9-]+)\.applicantpro\.com(?:[/?#]|$)')
+    if ($m.Success -and $m.Groups[1].Value.ToLower() -notin @('www', 'feeds', 'api', 'admin', 'app')) {
+        return @{ Provider = 'ApplicantPro'; Tenant = $m.Groups[1].Value.ToLower() }
+    }
     return $null
 }
 
@@ -199,6 +209,7 @@ function Get-SourceKey {
         }
         'Rippling'   { return 'rippling|' + (& $g 'Board') }
         'Paylocity'  { return 'paylocity|' + (& $g 'BoardId') }
+        'ApplicantPro' { return 'applicantpro|' + (& $g 'Tenant') }
         default      { return ([string]$Src.Provider).ToLower() + '|' + (& $g 'Company') }
     }
 }
@@ -311,6 +322,23 @@ function Invoke-SourceProbe {
                     $r.Answered = $true; $r.Postings = $jobs.Count
                     $r.Titles = @($jobs | Where-Object { & $prop $_ 'JobTitle' } | ForEach-Object { [string]$_.JobTitle })
                     if ((& $prop $pd 'ModuleTitle') -and $pd.ModuleTitle) { $r.Note = "board name: $($pd.ModuleTitle)" }
+                }
+            }
+            'ApplicantPro' {
+                # The /jobs/ page is built in the browser; its script reads the list
+                # from /core/jobs/<domainId>, so the probe does the same.
+                $base = "https://$($Src.Tenant).applicantpro.com"
+                $h = [string](Invoke-ScoutRequest "$base/jobs/")
+                $m = [regex]::Match($h, '(?<![\w])domainId\s*:\s*"?(\d+)')
+                if (-not $m.Success) { $r.Note = 'jobs page has no domain id' }
+                else {
+                    $j = Invoke-ScoutRequest "$base/core/jobs/$($m.Groups[1].Value)?getParams=%7B%7D"
+                    $jobs = @()
+                    if ((& $prop $j 'data') -and (& $prop $j.data 'jobs') -and $j.data.jobs) { $jobs = @($j.data.jobs) }
+                    $r.Answered = $true; $r.Postings = $jobs.Count
+                    $r.Titles = @($jobs | Where-Object { & $prop $_ 'title' } | ForEach-Object { [string]$_.title })
+                    $t = [regex]::Match($h, 'domainTitle\s*:\s*"([^"]+)"')
+                    if ($t.Success) { $r.Note = "board name: $($t.Groups[1].Value)" }
                 }
             }
             default { $r.Note = "not probed: run Invoke-JobSweep.ps1 -Source $($Src.Provider) -DryRun with the entry added" }

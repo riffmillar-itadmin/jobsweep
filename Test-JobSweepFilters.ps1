@@ -121,6 +121,8 @@ $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteT
           'Get-RipplingJobs','Add-RipplingDetail',
           'Get-PaylocityPageData','ConvertFrom-PaylocityJob','ConvertFrom-PaylocityDetail',
           'Get-PaylocityJobs','Add-PaylocityDetail',
+          'Get-ApplicantProDomainId','ConvertTo-ApplicantProPay','ConvertFrom-ApplicantProJob',
+          'ConvertFrom-ApplicantProDetail','Get-ApplicantProSitemapId','Get-ApplicantProJobs','Add-ApplicantProDetail',
           'Get-MicrosoftQuery','Get-MicrosoftGapText','Get-MicrosoftJobs','Get-RetryCoolOffWait',
           'Invoke-MicrosoftRetryPass','Get-WebTimeoutParameter','Get-GiveUpLevel')
 $parts = @()
@@ -1147,6 +1149,151 @@ Check 'Retry-After HTTP-date'         (ConvertFrom-RetryAfter 'Mon, 09 Nov 2026 
 Check 'Retry-After past date is 0'    (ConvertFrom-RetryAfter 'Mon, 09 Nov 2026 19:00:00 GMT' -Now ([datetime]::new(2026, 11, 9, 20, 0, 0, [DateTimeKind]::Utc))) 0
 Check 'Retry-After junk is 0'         (ConvertFrom-RetryAfter 'soon') 0
 
+# ---- APPLICANTPRO, added 2026-11-19 (1.9.0) -------------------------------
+# Fictional pages in the shape <tenant>.applicantpro.com serves: the /jobs/ page
+# holds no postings, only the board's domain id (after rootDomainId, which must
+# not be taken for it); /core/jobs/<domainId>?getParams={} answers the list as
+# JSON; each posting's page carries a schema.org JobPosting block; the sitemap
+# names every open posting and is the failover.
+Write-Host "`n-- APPLICANTPRO: domain id, JSON list, JobPosting detail, sitemap failover --"
+$apPage = @'
+<script>window.courierCurrentRouteData = {"domain_id":"9001","career_site_name":"Example CU","root_domain_title":"Example","root_domain_id":"4"};</script>
+<job-listings v-bind="componentData"></job-listings>
+<script>var componentData = { organizationId : 7001, rootDomainId : 4, domainId : 9001, domainName : "applicantpro.com", domainTitle : "Example Credit Union" };</script>
+'@
+Check 'ApplicantPro domain id, not the root one' (Get-ApplicantProDomainId $apPage) '9001'
+Check 'ApplicantPro domain id from route data'   (Get-ApplicantProDomainId '<script>x = {"domain_id":"9002","root_domain_id":"4"};</script>') '9002'
+Check 'ApplicantPro root id alone is no id'      (Get-ApplicantProDomainId '<script>a = { rootDomainId : 4 }; b = {"root_domain_id":"4"}</script>') ''
+Check 'ApplicantPro no page, no id'              (Get-ApplicantProDomainId '') ''
+
+Check 'ApplicantPro pay per hour'   (ConvertTo-ApplicantProPay '27.50' '33.25' 'per hour') '$27.50 - $33.25 per hour'
+Check 'ApplicantPro pay per year'   (ConvertTo-ApplicantProPay '88000' '104000' 'per year') '$88,000 - $104,000'
+Check 'ApplicantPro pay YEAR unit'  (ConvertTo-ApplicantProPay '76000' '91000' 'YEAR') '$76,000 - $91,000'
+Check 'ApplicantPro pay other unit' (ConvertTo-ApplicantProPay '1' '250000' 'other') ''
+Check 'ApplicantPro pay no figures' (ConvertTo-ApplicantProPay $null $null 'per hour') ''
+
+$apList = @'
+{"success":true,"message":"list","data":{"jobCount":4,"jobs":[
+ {"id":9100001,"title":"Service Desk Technician","city":"Harborview","abbreviation":"WM","stateName":"Westmark","workplaceType":"Work from home flexibility","payType":"Hourly","payTypeFrame":"per hour","minSalary":"27.50","maxSalary":"33.25","startDateRef":"Oct 30, 2026","jobUrl":"https://examplecu.applicantpro.com/jobs/9100001"},
+ {"id":9100002,"title":"IT Infrastructure Support Engineer ","city":"Harborview","abbreviation":"WM","workplaceType":"Fully remote","payTypeFrame":"per year","minSalary":"88000","maxSalary":"104000","startDateRef":"Jul 3, 2026","jobUrl":"https://examplecu.applicantpro.com/jobs/9100002"},
+ {"id":9100003,"title":"","city":"Harborview","abbreviation":"WM"},
+ {"id":9100004,"title":"Join Our Talent Network","city":null,"abbreviation":null,"stateName":"Westmark","workplaceType":null,"payType":"Other","payTypeFrame":"other","minSalary":"1","maxSalary":"250000","startDateRef":"Mar 15, 2025"}
+]}}
+'@ | ConvertFrom-Json
+$aj = @(@($apList.data.jobs) | ForEach-Object { ConvertFrom-ApplicantProJob $_ })
+Check 'ApplicantPro hybrid stays a place'   $aj[0].Location 'Harborview, WM'
+Check 'ApplicantPro fully remote'           $aj[1].Location 'Remote | Harborview, WM'
+Check 'ApplicantPro start date as ISO'      $aj[0].Posted '2026-10-30'
+Check 'ApplicantPro one-digit day'          $aj[1].Posted '2026-07-03'
+Check 'ApplicantPro title trimmed'          $aj[1].Title 'IT Infrastructure Support Engineer'
+Check 'ApplicantPro pay from the list'      $aj[0].Pay '$27.50 - $33.25 per hour'
+Check 'ApplicantPro no title is null'       ($null -eq $aj[2]) $true
+Check 'ApplicantPro state name fallback'    $aj[3].Location 'Westmark'
+Check 'ApplicantPro placeholder has no pay' $aj[3].Pay ''
+Check 'ApplicantPro id is text'             $aj[0].Id '9100001'
+
+$apDetail = @'
+<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"Organization","name":"Example"}</script>
+<script type="application/ld+json">{"@context":"http://schema.org/","@type":"JobPosting","title":"IT Infrastructure Support Engineer",
+"description":"<p>Run <strong>Intune</strong> and Entra ID for 40 branches.</p><ul><li>3+ years of endpoint support</li></ul>",
+"datePosted":"2026-07-03 00:00:00","validThrough":"2031-07-03 00:00:00T23:59","employmentType":"FULL_TIME",
+"baseSalary":{"@type":"MonetaryAmount","currency":"USD","value":{"@type":"QuantitativeValue","unitText":"YEAR","minValue":"88000","maxValue":"104000"}},
+"jobLocation":{"@type":"Place","address":{"@type":"PostalAddress","streetAddress":"1 Dock St","addressLocality":"Harborview","addressRegion":"WM","addressCountry":"US"}}}</script>
+</head><body>...</body></html>
+'@
+$ad = ConvertFrom-ApplicantProDetail $apDetail
+Check 'ApplicantPro detail: JobPosting found past other blocks' $ad.Title 'IT Infrastructure Support Engineer'
+Check 'ApplicantPro detail: description as text' ($ad.Content -like 'Run Intune and Entra ID for 40 branches.*3+ years of endpoint support*') $true
+Check 'ApplicantPro detail: place'               $ad.Location 'Harborview, WM'
+Check 'ApplicantPro detail: posted date only'    $ad.Posted '2026-07-03'
+Check 'ApplicantPro detail: pay from baseSalary' $ad.Pay '$88,000 - $104,000'
+Check 'ApplicantPro detail: telecommute is Remote' (ConvertFrom-ApplicantProDetail '<script type="application/ld+json">{"@type":"JobPosting","title":"A","jobLocationType":"TELECOMMUTE","jobLocation":{"address":{"addressRegion":"WM"}}}</script>').Location 'Remote | WM'
+Check 'ApplicantPro detail: no block is null'    ($null -eq (ConvertFrom-ApplicantProDetail '<html>none</html>')) $true
+Check 'ApplicantPro detail: bad JSON is skipped' ($null -eq (ConvertFrom-ApplicantProDetail '<script type="application/ld+json">{ not json</script>')) $true
+
+$apMap = @'
+<?xml version='1.0' encoding='UTF-8'?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://www.applicantpro.com/openings/examplecu/jobs/9100002</loc><lastmod>2026-07-03</lastmod></url>
+  <url><loc>https://www.applicantpro.com/openings/examplecu/jobs/9100005</loc><lastmod>2026-11-02</lastmod></url>
+  <url><loc>https://www.applicantpro.com/openings/examplecu/jobs/9100002</loc><lastmod>2026-07-03</lastmod></url>
+  <url><loc>https://www.applicantpro.com/openings/examplecu/jobs/</loc><lastmod>2026-11-19</lastmod></url>
+</urlset>
+'@
+Check 'ApplicantPro sitemap ids, once each, no list page' ((Get-ApplicantProSitemapId $apMap) -join ',') '9100002,9100005'
+Check 'ApplicantPro empty sitemap'                        (@(Get-ApplicantProSitemapId '<urlset></urlset>').Count) 0
+
+$script:testLog = @()
+function Write-Log {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '',
+        Justification = 'Test stand-in for the collector''s own Write-Log; records lines instead of printing them.')]
+    param([string]$Message, [string]$Level = 'INFO')
+    $script:testLog += "[$Level] $Message"
+}
+$script:apCalls = @(); $script:apListFails = $false
+function Invoke-Html { param([string]$Uri)
+    $script:apCalls += $Uri
+    if ($Uri -like '*/jobs/') { return $apPage }
+    if ($Uri -like '*/job_site_map.xml') { return $apMap }
+    if ($Uri -like '*/jobs/9100002.html') { return $apDetail }
+    if ($Uri -like '*/jobs/9100001.html') { return '<script type="application/ld+json">{"@type":"JobPosting","title":"Service Desk Technician","description":"<p>Desk support for branches.</p>"}</script>' }
+    throw "HTTP 404 from the fake page $Uri"
+}
+function Invoke-Json { param([string]$Uri)
+    $script:apCalls += $Uri
+    if ($Uri -like '*/core/jobs/9001?getParams=%7B%7D') { if ($script:apListFails) { throw 'HTTP 500 from the fake list' } else { return $apList } }
+    throw "unexpected URI $Uri"
+}
+$apSrc = @{ Company = 'Example Credit Union'; Tenant = 'ExampleCU' }
+$ap = @(Get-ApplicantProJobs $apSrc)
+Check 'ApplicantPro: titleless left out'        (($ap | ForEach-Object Title) -join ', ') 'Service Desk Technician, IT Infrastructure Support Engineer, Join Our Talent Network'
+Check 'ApplicantPro: titleless row counted'     (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like '*ApplicantPro Example Credit Union: skipped 1 row*' }).Count) 1
+Check 'ApplicantPro: tenant lower-cased'        $script:apCalls[0] 'https://examplecu.applicantpro.com/jobs/'
+Check 'ApplicantPro: list from the domain id'   $script:apCalls[1] 'https://examplecu.applicantpro.com/core/jobs/9001?getParams=%7B%7D'
+Check 'ApplicantPro: key by job id'             $ap[0].Key 'ApplicantPro|9100001'
+Check 'ApplicantPro: url is the posting page'   $ap[0].Url 'https://examplecu.applicantpro.com/jobs/9100001'
+Check 'ApplicantPro: detail is the .html page'  $ap[0].DetailPath 'https://examplecu.applicantpro.com/jobs/9100001.html'
+Check 'ApplicantPro: list pay on the posting'   $ap[0].Pay '$27.50 - $33.25 per hour'
+Check 'ApplicantPro: no text before detail'     $ap[0].Content ''
+Check 'ApplicantPro: count matches, no warning' (@($script:testLog | Where-Object { $_ -like '*the board says*' }).Count) 0
+Check 'ApplicantPro: log names the list'        (@($script:testLog | Where-Object { $_ -like '*ApplicantPro Example Credit Union: 3 postings -- JSON list, domain 9001*' }).Count) 1
+
+$script:apCalls = @()
+$apPin = @(Get-ApplicantProJobs @{ Company = 'Example Credit Union'; Tenant = 'examplecu'; DomainId = '9001' })
+Check 'ApplicantPro: DomainId skips the page'   (@($script:apCalls | Where-Object { $_ -like '*/jobs/' }).Count) 0
+Check 'ApplicantPro: DomainId still lists'      $apPin.Count 3
+
+$apList.data.jobCount = 9
+$script:testLog = @()
+$null = @(Get-ApplicantProJobs $apSrc)
+Check 'ApplicantPro: short list is a warning'   (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like '*the board says 9 postings but the list gave 4*' }).Count) 1
+$apList.data.jobCount = 4
+
+Add-ApplicantProDetail $ap[1]
+Check 'ApplicantPro detail: content filled'     ($ap[1].Content -like 'Run Intune*') $true
+Check 'ApplicantPro detail: list pay kept'      $ap[1].Pay '$88,000 - $104,000'
+$ap[0].ListPay = ''
+Add-ApplicantProDetail $ap[0]
+Check 'ApplicantPro detail: no pay anywhere'    $ap[0].Pay ''
+Check 'ApplicantPro detail: page text read'     $ap[0].Content 'Desk support for branches.'
+$script:testLog = @()
+Add-ApplicantProDetail $ap[2]
+Check 'ApplicantPro detail: failure is a warning' (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like '*detail fetch failed for Example Credit Union / Join Our Talent Network*' }).Count) 1
+Check 'ApplicantPro detail: failure keeps row'  $ap[2].Title 'Join Our Talent Network'
+
+# Failover: the list fails, so the sitemap and each posting's page stand in.
+$script:apListFails = $true
+$script:testLog = @()
+$apF = @(Get-ApplicantProJobs $apSrc)
+Check 'ApplicantPro failover: list failure warned'   (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like '*list failed (HTTP 500 from the fake list)*' }).Count) 1
+Check 'ApplicantPro failover: postings from pages'   (($apF | ForEach-Object Title) -join ', ') 'IT Infrastructure Support Engineer'
+Check 'ApplicantPro failover: unloadable page warned' (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like '*posting 9100005 did not load*' }).Count) 1
+Check 'ApplicantPro failover: text already in'      ($apF[0].Content -like 'Run Intune*') $true
+Check 'ApplicantPro failover: pay from the page'    $apF[0].Pay '$88,000 - $104,000'
+Check 'ApplicantPro failover: place from the page'  $apF[0].Location 'Harborview, WM'
+Check 'ApplicantPro failover: log says how'         (@($script:testLog | Where-Object { $_ -like '*1 postings -- sitemap and posting pages (failover), 2 listed, 1 did not load*' }).Count) 1
+$script:apListFails = $false
+Remove-Item Function:\Invoke-Html, Function:\Invoke-Json, Function:\Write-Log
+
 # ---- SOURCES CARRY THE KEYS THEIR PROVIDER READS, added 2026-11-03 -------
 # The example profile shipped a Workday entry with Dc= and an iCIMS entry with
 # Token=, but the collector reads WdHost and BaseUrl. Anyone copying them got a
@@ -1155,7 +1302,7 @@ Write-Host "`n-- SOURCES: every entry has the keys its provider reads --"
 $needs = @{
     Greenhouse = @('Token'); Lever = @('Token'); Workday = @('WdHost', 'Tenant', 'Site'); iCIMS = @('BaseUrl')
     UltiPro = @('Tenant', 'BoardId'); ADP = @('Cid', 'CcId'); Dayforce = @('Namespace'); Microsoft = @('Queries')
-    Rippling = @('Board'); Paylocity = @('BoardId')
+    Rippling = @('Board'); Paylocity = @('BoardId'); ApplicantPro = @('Tenant')
 }
 $badSrc = @()
 foreach ($s in @($Config.Sources)) {
@@ -1204,6 +1351,11 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'Paylocity board'        (& $u 'https://recruiting.paylocity.com/Recruiting/Jobs/All/00000000-0000-0000-0000-0000000000AA/Example-Clinic') "@{ Provider='Paylocity'; BoardId='00000000-0000-0000-0000-0000000000aa' }"
     Check 'Paylocity other host'   (& $u 'https://2000recruiting.paylocity.com/recruiting/jobs/All/00000000-0000-0000-0000-0000000000aa') "@{ Provider='Paylocity'; PlcHost='https://2000recruiting.paylocity.com'; BoardId='00000000-0000-0000-0000-0000000000aa' }"
     Check 'Paylocity posting only' (& $u 'https://recruiting.paylocity.com/Recruiting/Jobs/Details/9000101') 'none'
+    Check 'ApplicantPro tenant host' (& $u 'https://ExampleCU.applicantpro.com/jobs/9100002.html') "@{ Provider='ApplicantPro'; Tenant='examplecu' }"
+    Check 'ApplicantPro jobs list'   (& $u 'https://examplecu.applicantpro.com/jobs/')            "@{ Provider='ApplicantPro'; Tenant='examplecu' }"
+    Check 'ApplicantPro openings'    (& $u 'https://www.applicantpro.com/openings/examplecu/jobs/9100002') "@{ Provider='ApplicantPro'; Tenant='examplecu' }"
+    Check 'ApplicantPro www is not a tenant' (& $u 'https://www.applicantpro.com/pricing')         'none'
+    Check 'ApplicantPro feeds is not a tenant' (& $u 'https://feeds.applicantpro.com/site_map_index.xml') 'none'
     Check 'unknown site'           (& $u 'https://www.example.com/careers')                                'none'
     Check 'blank URL'              (& $u '')                                                               'none'
 
@@ -1220,6 +1372,7 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'key: Rippling board'        (Get-SourceKey @{ Provider='Rippling'; Board='Example-Robotics' }) 'rippling|example-robotics'
     Check 'key: Paylocity board'       (Get-SourceKey @{ Provider='Paylocity'; BoardId='00000000-0000-0000-0000-0000000000AA' }) 'paylocity|00000000-0000-0000-0000-0000000000aa'
     Check 'name from Paylocity slug'   (Get-NameFromSource (ConvertFrom-CareersUrl 'https://recruiting.paylocity.com/recruiting/jobs/All/00000000-0000-0000-0000-0000000000aa/Example-Clinic-LLC')) 'Example Clinic LLC'
+    Check 'key: ApplicantPro tenant'   (Get-SourceKey @{ Provider='ApplicantPro'; Tenant='ExampleCU' }) 'applicantpro|examplecu'
     Check 'name from Rippling board'   (Get-NameFromSource @{ Provider='Rippling'; Board='example-robotics' }) 'example-robotics'
     Check 'name from iCIMS host'       (Get-NameFromSource @{ Provider='iCIMS'; BaseUrl='https://careers-examplebank.icims.com' }) 'examplebank'
 
