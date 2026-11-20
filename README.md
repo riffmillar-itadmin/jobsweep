@@ -40,7 +40,7 @@ That is what the test suite is for.
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs, company names or an employer list into `Sources` entries you can paste, finding careers pages on the way. See [Finding new sources](#finding-new-sources). |
 | `Find-JobSweepEmployers.ps1` | ✅ | Employer discovery. Lists employers in your zone from public datasets, for the scout to work through. See [Finding employers](#finding-employers). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 722 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 741 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -267,6 +267,13 @@ grantmakers, pass-through funds, and units that hire through a parent's board.
 the employer name, in any case. Each match is dropped and printed as
 `name excluded: <name> (<pattern>)`, and the summary counts them. Anchor a
 pattern (`^...$`) to drop one name rather than a family of names.
+`IndustryExclude` works the same way on the `industry` column, for kinds of
+employer you never want (consultancies, for example), whichever dataset or CSV
+names them; matches print as `industry excluded:`. A `source_dataset` column in
+your own CSV is kept when it is set (for example `manual`), so hand-kept rows
+stay distinguishable in the merged list. An `in_zone` column (`true` or
+`false`) in your own CSV wins over the ZIP and city test, for rows you have
+already checked against your zone or that have no address.
 
 It checks each site's robots.txt before every request and does not fetch a
 path that is disallowed; requests are a second apart and carry a descriptive
@@ -314,7 +321,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1444  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1482  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -322,11 +329,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  722    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  722    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  741    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  741    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1444  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1482  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -365,6 +372,18 @@ decide what ships.
 
 ## Changelog
 
+- **1.12.0** (2026-11-20): wider industry scope for the employer list.
+  - `Discovery.IndustryExclude`: regular expressions matched against the
+    `industry` column. A match is dropped whichever dataset or CSV named it,
+    printed as `industry excluded:`, and counted in the summary. For kinds of
+    employer you never want, such as consultancies, managed-service providers
+    or aerospace.
+  - Your own CSVs (`Discovery.ExtraCsv`) keep a non-blank `source_dataset`
+    value, such as `manual`, so hand-kept rows stay distinguishable, and a
+    non-blank `in_zone` (true or false) wins over the ZIP and city test.
+  - Nonprofits in NTEE groups H and U are labelled `research institute
+    (medical)` and `research institute (science and technology)`.
+  - 19 new regression cases (741).
 - **1.11.1** (2026-11-20): client-care support titles are excluded. The
   first dry run of the boards the careers-page finder found put crisis, client,
   family, resident and clinical support specialists from human-services

@@ -138,8 +138,13 @@ ClearanceScreen = 'check'
 #                     arms, grantmakers and pass-through funds that employ few
 #                     people, and for units that hire through a parent's board.
 #                     Anchor a pattern (^...$) to drop one name, not a family.
+#   IndustryExclude   regular expressions matched against the industry column,
+#                     any case; a match is dropped whichever dataset named it.
+#                     For kinds of employer you never want, such as consultancies.
 #   ExtraCsv          your own CSVs (company, website, industry, city, zip) for
-#                     employers no dataset covers, such as public agencies
+#                     employers no dataset covers, such as public agencies. A
+#                     source_dataset column is kept when set (for example 'manual'),
+#                     and an in_zone column (true or false) wins over ZIP and city
 Discovery = @{
     State                = 'WM'
     ZoneZipPrefixes      = @('000')
@@ -153,6 +158,7 @@ Discovery = @{
     NteeExclude          = @('X')
     IrsSubsections       = @('03')
     NameExclude          = @('^(the )?harborview community fund$', 'hospital foundation$')
+    IndustryExclude      = @('consult', '\bmsp\b|managed (it )?services', 'aerospace')
     # ExtraCsv           = @('%USERPROFILE%\Documents\JobSweep\employers-extra.csv')
 }
 
