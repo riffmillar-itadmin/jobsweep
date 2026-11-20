@@ -279,6 +279,39 @@ Check 'DC Sales Exec DROPS'           (Test-TitleMatch 'Data Center Account Exec
 # physical grounds now, so the keyword had nothing left to justify it.
 Check 'Datacenter Eng no longer kept'  (Test-TitleMatch 'Datacenter Engineer').Ok                            $false
 
+Write-Host "`n-- TITLE: aerospace engineering, added 2026-11-19 (1.8.5) --"
+# A space company's board put these on the candidate list on 'systems engineer'
+# week after week. Generic aerospace vocabulary drops them.
+Check 'Avionics Systems Eng DROPS'      (Test-TitleMatch 'Avionics Systems Engineer III').Ok                         $false
+Check 'Aerospace Systems Eng DROPS'     (Test-TitleMatch 'Aerospace Systems Engineer II').Ok                         $false
+Check 'Spacecraft Verification DROPS'   (Test-TitleMatch 'Systems Engineer, Spacecraft Verification').Ok             $false
+Check 'Safety and Reliability DROPS'    (Test-TitleMatch 'Program Safety and Reliability Senior Systems Engineer').Ok $false
+Check 'Safety & Reliability DROPS'      (Test-TitleMatch 'Sr. System Safety & Reliability Systems Engineer').Ok      $false
+Check 'Fluid Systems Eng DROPS'         (Test-TitleMatch 'Fluid Systems Engineer III - Third Stage').Ok              $false
+Check 'Fluids Systems Eng DROPS'        (Test-TitleMatch 'Fluids Systems Engineer II').Ok                            $false
+Check 'GN&C Systems Eng DROPS'          (Test-TitleMatch 'GN&C Systems Engineer II').Ok                              $false
+Check 'GNC Systems Eng DROPS'           (Test-TitleMatch 'GNC Systems Engineer III').Ok                              $false
+Check 'Propulsion Systems Eng DROPS'    (Test-TitleMatch 'Propulsion Systems Engineer').Ok                           $false
+Check 'RF Systems Eng DROPS'            (Test-TitleMatch 'RF Systems Engineer III').Ok                               $false
+Check 'Electrical Systems Eng DROPS'    (Test-TitleMatch 'Senior Electrical Systems Engineer').Ok                    $false
+Check 'Electrical Power Eng DROPS'      (Test-TitleMatch 'Senior Systems Engineer - Electrical Power System').Ok     $false
+Check 'Embedded Systems Eng DROPS'      (Test-TitleMatch 'Senior Embedded Systems Engineer').Ok                      $false
+Check 'Mission Systems Eng DROPS'       (Test-TitleMatch 'Senior Mission Systems Engineer').Ok                       $false
+Check 'Ground Systems Eng DROPS'        (Test-TitleMatch 'Sr. Ground Systems Engineer').Ok                           $false
+Check 'Lunar Systems Eng DROPS'         (Test-TitleMatch 'Systems Engineer III - Fault Management, Lunar Lander').Ok $false
+Check 'Autonomy Systems Eng DROPS'      (Test-TitleMatch 'Autonomy Software Systems Engineer II').Ok                 $false
+Check 'Orbital platform eng DROPS'      (Test-TitleMatch 'Customer Platform Engineer III - Orbital Data Centers').Ok  $false
+Check 'Avionics drop names the rule'    ((Test-TitleMatch 'Avionics Systems Engineer III').Reason -like '*avionics*') $true
+# Left out on purpose: each of these is an IT title the same board posted.
+Check 'Launch IT Support Analyst KEPT'  (Test-TitleMatch 'Launch Communications IT Support Analyst II').Ok            $true
+Check 'Lunar Systems Admin KEPT'        (Test-TitleMatch 'Lunar Systems Administrator - Level 1').Ok                  $true
+Check 'Identity Verification KEPT'      (Test-TitleMatch 'Identity Verification Analyst').Ok                          $true
+Check 'Site Reliability Eng still KEPT' (Test-TitleMatch 'Senior Site Reliability Engineer').Ok                       $true
+Check 'Endpoint Security Eng KEPT'      (Test-TitleMatch 'Endpoint Security Engineer III').Ok                         $true
+Check 'M365 and Identity Admin KEPT'    (Test-TitleMatch 'Systems Administrator - M365 & Identity').Ok                $true
+Check 'plain Systems Engineer KEPT'     (Test-TitleMatch 'Senior Systems Engineer').Ok                                $true
+Check 'IT Systems Engineer KEPT'        (Test-TitleMatch 'IT Systems Engineer').Ok                                    $true
+
 Write-Host "`n-- TITLE: well-being and wellness support roles, added 2026-11-19 (1.8.4) --"
 # A hospital's "Well-being Support Specialist" reached the candidate list on
 # 'support specialist' on 2026-11-18. It is a patient and staff support role.
