@@ -380,7 +380,9 @@ function Get-EmployerWord {
 function Get-DomainGuess {
     <# Homepage guesses for a name with no website, best first: the words run
        together, without generic tails, without the leading place name, and the
-       initials of a long name; .org before .com. At most -Max guesses. #>
+       initials of a long name; .org before .com. At most -Max guesses.
+       Dropping the place name needs two words left, and a guess is never one
+       generic word: "Harborview Medical Center" must not guess medical.com. #>
     param([string]$Name, [int]$Max = 6)
     $all = @((Get-EmployerNameKey $Name) -split ' ' | Where-Object { $_ })
     if ($all.Count -eq 0) { return @() }
@@ -390,9 +392,13 @@ function Get-DomainGuess {
     $tail = @('hospital', 'clinic', 'clinics', 'foundation', 'society', 'institute', 'school', 'club', 'house', 'network', 'project', 'alliance', 'agency')
     $short = @($w | Where-Object { $tail -notcontains $_ })
     if ($short.Count -ge 2) { $stems += ($short -join '') }
-    if ($w.Count -ge 2) { $stems += (@($w | Select-Object -Skip 1) -join '') }
+    if ($w.Count -ge 3) { $stems += (@($w | Select-Object -Skip 1) -join '') }
     if ($all.Count -ge 3) { $stems += (($all | ForEach-Object { $_[0] }) -join '') }
+    $generic = @('medical', 'college', 'health', 'healthcare', 'hospital', 'clinic', 'school', 'schools', 'university', 'city',
+                 'county', 'district', 'community', 'public', 'library', 'housing', 'center', 'centre', 'services', 'church',
+                 'museum', 'foundation', 'institute', 'society', 'bank', 'credit', 'union', 'law', 'care', 'family', 'children')
     $out = foreach ($s in ($stems | Select-Object -Unique)) {
+        if ($generic -contains $s) { continue }
         if ($s.Length -ge 3 -and $s.Length -le 30) { "https://www.$s.org/"; "https://www.$s.com/" }
     }
     return @($out | Select-Object -First $Max)
@@ -401,7 +407,8 @@ function Get-DomainGuess {
 function Test-PageNamesEmployer {
     <# A guessed homepage is accepted only when its title (or og:site_name) holds
        most of the employer's words AND the page names the employer's city, so a
-       namesake elsewhere ("Children's Hospital" in another state) is refused. #>
+       namesake elsewhere ("Children's Hospital" in another state) is refused.
+       With no city to check, the title must hold every word. #>
     param([string]$Html, [string]$Name, [string]$City)
     $t = [regex]::Match([string]$Html, '(?is)<title[^>]*>(.*?)</title>').Groups[1].Value
     $t += ' ' + [regex]::Match([string]$Html, '(?i)<meta[^>]+property=["'']og:site_name["''][^>]+content=["'']([^"'']+)').Groups[1].Value
@@ -409,8 +416,8 @@ function Test-PageNamesEmployer {
     $w = @(Get-EmployerWord $Name)
     if ($w.Count -eq 0) { return $false }
     $hit = @($w | Where-Object { $tk -like "* $_ *" }).Count
+    if (-not $City) { return ($hit -eq $w.Count) }
     if (($hit / $w.Count) -lt 0.5) { return $false }
-    if (-not $City) { return $true }
     $c = [regex]::Escape(([string]$City).Trim())
     return [bool]([regex]::IsMatch([string]$Html, "(?i)\b$c\b"))
 }
