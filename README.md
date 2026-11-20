@@ -40,7 +40,7 @@ That is what the test suite is for.
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs, company names or an employer list into `Sources` entries you can paste, finding careers pages on the way. See [Finding new sources](#finding-new-sources). |
 | `Find-JobSweepEmployers.ps1` | ✅ | Employer discovery. Lists employers in your zone from public datasets, for the scout to work through. See [Finding employers](#finding-employers). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 709 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 722 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -314,7 +314,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1418  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1444  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -322,11 +322,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  709    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  709    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  722    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  722    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1418  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1444  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -365,6 +365,14 @@ decide what ships.
 
 ## Changelog
 
+- **1.11.1** (2026-11-20): client-care support titles are excluded. The
+  first dry run of the boards the careers-page finder found put crisis, client,
+  family, resident and clinical support specialists from human-services
+  agencies on the candidate list on `support specialist`, and credit unions
+  post branch roles as "Member Support Specialist". Replayed across 13,841 past
+  titles, the new patterns drop 39 and no IT title. Client support with IT,
+  technical, desktop, computer or systems in the title is kept. 13 new
+  regression cases (722).
 - **1.11.0** (2026-11-19): careers-page finder in the scout.
   - `Find-JobSweepSources.ps1 -EmployerCsv` takes an employer list and finds
     each careers page from `careers_url`, the `website`'s careers link, or a
