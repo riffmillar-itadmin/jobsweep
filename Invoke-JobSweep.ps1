@@ -175,6 +175,9 @@
     1.12.2 (2026-11-20): the careers-page finder no longer guesses a website
     from one generic word, and with no city to check it needs every word of the
     name in the page title.
+    1.13.0 (2026-11-21): ADP MyJobs career sites (myjobs.adp.com/<name>/cx). An
+    ADP source with MyJobs='<name>' reads the site's settings for its token and
+    the job list from my.adp.com; the scout and finder recognise the URL.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -207,7 +210,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.12.2'
+$JobSweepVersion = '1.13.0'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -1408,6 +1411,8 @@ function Get-AdpOtherHost {
 
 function Get-AdpJobs {
     param($Src)
+    # A MyJobs career site (myjobs.adp.com/<name>) is a different product with its own reader.
+    if ($Src.ContainsKey('MyJobs') -and $Src.MyJobs) { return @(Get-AdpMyJobs $Src) }
     $adpHost = Get-AdpHost $Src
     $path = '/mascsr/default/careercenter/public/events/staffing/v1/job-requisitions'
     $qs   = "cid=$($Src.Cid)&ccId=$($Src.CcId)&lang=en_US"
@@ -1521,6 +1526,92 @@ function Add-AdpDetail {
         Write-Log "  detail fetch failed for $($Posting.Company) / $($Posting.Title): $($_.Exception.Message)" 'WARN'
     }
     Start-Sleep -Milliseconds $script:Throttle
+}
+
+function Get-AdpMyJobsTenant {
+    <# The career-site name in myjobs.adp.com/<name>/cx. Letters, digits, - and _
+       only, so a typo can't point the requests at another host or path. #>
+    param($Src)
+    $t = ([string]$Src.MyJobs).Trim()
+    if ($t -notmatch '^[A-Za-z0-9_-]{2,64}$') {
+        throw "MyJobs '$($Src.MyJobs)' is not a myjobs.adp.com career-site name (the part after myjobs.adp.com/)"
+    }
+    return $t.ToLower()
+}
+
+function ConvertFrom-AdpMyJobsRequisition {
+    <# One row of the MyJobs job list as a posting. The list carries the full
+       description and qualifications, so no detail call is needed. reqId is
+       ADP's own id, unique across employers; clientRequisitionID is the
+       employer's number and can repeat between employers, so it isn't the key. #>
+    param($Req, [string]$Company, [string]$Tenant)
+    $id = [string](Get-JsonValue $Req 'reqId')
+    $title = [string](Get-JsonValue $Req 'publishedJobTitle')
+    if (-not $title) { $title = [string](Get-JsonValue $Req 'jobTitle') }
+    if (-not $id -or -not $title) { return $null }
+    $places = @()
+    foreach ($l in @(Get-JsonValue $Req 'requisitionLocations')) {
+        $a = Get-JsonValue $l 'address'
+        if ($null -eq $a) { continue }
+        $parts = @([string](Get-JsonValue $a 'cityName'), [string](Get-JsonValue (Get-JsonValue $a 'countrySubdivisionLevel1') 'codeValue')) | Where-Object { $_ }
+        if ($parts.Count) { $places += ($parts -join ', ') }
+    }
+    $loc = (@($places | Select-Object -Unique) -join '; ')
+    $html = ([string](Get-JsonValue $Req 'jobDescription')) + "`n" + ([string](Get-JsonValue $Req 'jobQualifications'))
+    $text = Convert-HtmlToText $html
+    $url = "https://myjobs.adp.com/$Tenant/cx/job-details?reqId=$id"
+    return New-Posting -Source 'ADP' -Company $Company -Title $title -Location $loc -Url $url `
+                -ReqId $id -Posted ([string](Get-JsonValue $Req 'postingDate')) -Content $text
+}
+
+function Get-AdpMyJobs {
+    <# ADP's other careers product, myjobs.adp.com/<name>/cx (ADP Recruiting
+       Management), added 1.13.0. Two calls, both public and allowed by
+       robots.txt on 2026-11-21:
+         1. myjobs.adp.com/public/staffing/v1/career-site/<name> -- the site's
+            settings, including a myJobsToken that names the employer;
+         2. my.adp.com/.../job-requisitions/apply-custom-filters with that token
+            in a myjobstoken header -- the job list, paged with $top/$skip, with
+            the total in count.
+       The token is read fresh on every run and never logged. #>
+    param($Src)
+    $tenant = Get-AdpMyJobsTenant $Src
+    $site = Invoke-Json -Uri "https://myjobs.adp.com/public/staffing/v1/career-site/$tenant" -Label "$($Src.Company) MyJobs site"
+    $token = [string](Get-JsonValue $site 'myJobsToken')
+    if (-not $token) { throw "the MyJobs site '$tenant' gave no myJobsToken -- check the name, or the site may be closed" }
+    $h = @{ Accept = 'application/json'; myjobstoken = $token }
+    $sel = 'reqId,jobTitle,publishedJobTitle,jobDescription,jobQualifications,clientRequisitionID,postingDate,requisitionLocations'
+    $base = 'https://my.adp.com/myadp_prefix/mycareer/public/staffing/v1/job-requisitions/apply-custom-filters'
+    $top = 20
+    $out = @()
+    $ids = @{}
+    $skip = 0
+    $total = $null
+    $page = 0
+    while ($page -lt 30) {
+        $page++
+        $r = Invoke-Json -Uri ($base + '?$select=' + $sel + '&$top=' + $top + '&$skip=' + $skip + '&$filter=&tz=UTC') -Headers $h -Label "$($Src.Company) MyJobs list"
+        if ($null -eq $total) { $total = Get-JsonValue $r 'count' }
+        $reqs = @(Get-JsonValue $r 'jobRequisitions' | Where-Object { $null -ne $_ })
+        if ($reqs.Count -eq 0) { break }
+        $added = 0
+        foreach ($j in $reqs) {
+            $p = ConvertFrom-AdpMyJobsRequisition $j $Src.Company $tenant
+            if ($null -eq $p -or $ids.ContainsKey($p.ReqId)) { continue }
+            $ids[$p.ReqId] = $true
+            $out += $p
+            $added++
+        }
+        $skip += $reqs.Count
+        if ($added -eq 0 -or ($null -ne $total -and $skip -ge [int]$total)) { break }
+        Write-Host '.' -NoNewline -ForegroundColor DarkGray
+        Start-Sleep -Milliseconds $script:Throttle
+    }
+    if ($page -gt 1) { Write-Host '' }
+    if ($null -ne $total -and [int]$total -gt $out.Count) {
+        Write-Log ("   ADP MyJobs {0}: the site says {1} postings but the list gave {2}" -f $Src.Company, $total, $out.Count) 'WARN'
+    }
+    return $out
 }
 
 function Get-IcimsSitemapUrl {

@@ -206,6 +206,9 @@ Sources = @(
     @{ Provider='ADP';        Company='Example Manufacturing'
        Cid='00000000-0000-0000-0000-000000000000'; CcId='19000101_000001' }
 
+    # ---- ADP MyJobs: myjobs.adp.com/<MyJobs>/cx/job-listing, the name after the host
+    @{ Provider='ADP';        Company='Example Port Services'; MyJobs='examplecareers' }
+
     # ---- Dayforce: jobs.dayforcehcm.com/api/geo/<Namespace>/jobposting/search
     # Board defaults to CANDIDATEPORTAL, the name most employers use.
     @{ Provider='Dayforce';   Company='Example Logistics';   Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }

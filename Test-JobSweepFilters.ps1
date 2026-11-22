@@ -125,7 +125,8 @@ $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteT
           'ConvertFrom-ApplicantProDetail','Get-ApplicantProSitemapId','Get-ApplicantProJobs','Add-ApplicantProDetail',
           'Get-MicrosoftQuery','Get-MicrosoftGapText','Get-MicrosoftJobs','Get-RetryCoolOffWait',
           'Invoke-MicrosoftRetryPass','Get-WebTimeoutParameter','Get-GiveUpLevel',
-          'Get-HttpFailure','Test-HttpNotFound','Get-AdpHost','Get-AdpOtherHost','Get-AdpJobs')
+          'Get-HttpFailure','Test-HttpNotFound','Get-AdpHost','Get-AdpOtherHost','Get-AdpJobs',
+          'Get-AdpMyJobsTenant','ConvertFrom-AdpMyJobsRequisition','Get-AdpMyJobs')
 $parts = @()
 
 $assign = @($ast.FindAll({ param($n)
@@ -1393,6 +1394,69 @@ Check 'ADP both 404: error not swallowed'        ($adpBoth -like '*404*') $true
 Check 'ADP both 404: one try per host'           $script:adpCalls.Count 2
 Remove-Item Function:\Invoke-Json, Function:\Write-Log
 
+# ---- ADP MYJOBS, added 1.13.0 ----------------------------------------------
+# myjobs.adp.com/<name>/cx is ADP Recruiting Management, not WorkforceNow. The
+# site's settings give a myJobsToken; the job list on my.adp.com wants it in a
+# myjobstoken header and pages with $top/$skip, the total in count.
+Write-Host "`n-- ADP MyJobs: myjobs.adp.com career sites --"
+Check 'MyJobs name: lower-cased'                (Get-AdpMyJobsTenant @{ MyJobs = ' ExampleCareers ' }) 'examplecareers'
+$mjBad = try { Get-AdpMyJobsTenant @{ MyJobs = 'example.org/x' }; 'accepted' } catch { 'refused' }
+Check 'MyJobs name: a host or path refused'     $mjBad 'refused'
+$mjReq = [pscustomobject]@{ reqId = '9000000000101'; jobTitle = 'Sys Admin'; publishedJobTitle = 'Systems Administrator'
+    clientRequisitionID = '26-0001'; postingDate = '2026-11-20T22:42:18Z'
+    jobDescription = '<p>Run the <strong>Windows</strong> estate.</p>'; jobQualifications = '<ul><li>Pay range $70,000 - $80,000 per year</li></ul>'
+    requisitionLocations = @([pscustomobject]@{ address = [pscustomobject]@{ cityName = 'Harborview'; countrySubdivisionLevel1 = [pscustomobject]@{ codeValue = 'WM' } } }) }
+$mjP = ConvertFrom-AdpMyJobsRequisition $mjReq 'Example Port Services' 'examplecareers'
+Check 'MyJobs row: published title wins'        $mjP.Title 'Systems Administrator'
+Check 'MyJobs row: place'                       $mjP.Location 'Harborview, WM'
+Check 'MyJobs row: ADP reqId is the key'        $mjP.Key 'ADP|9000000000101'
+Check 'MyJobs row: posting url'                 $mjP.Url 'https://myjobs.adp.com/examplecareers/cx/job-details?reqId=9000000000101'
+Check 'MyJobs row: description and qualifications read' (($mjP.Content -like '*Windows estate*') -and ($mjP.Content -like '*Pay range*')) $true
+Check 'MyJobs row: pay from the text'           ($mjP.Pay -like '*70,000*80,000*') $true
+Check 'MyJobs row: no detail call needed'       ($mjP.PSObject.Properties.Name -contains 'DetailPath') $false
+Check 'MyJobs row: no title, no posting'        ($null -eq (ConvertFrom-AdpMyJobsRequisition ([pscustomobject]@{ reqId = '1' }) 'X' 'x')) $true
+$mjNoPlace = ConvertFrom-AdpMyJobsRequisition ([pscustomobject]@{ reqId = '2'; jobTitle = 'Help Desk Analyst' }) 'X' 'x'
+Check 'MyJobs row: no location, still read'     ('{0}|{1}' -f $mjNoPlace.Title, $mjNoPlace.Location) 'Help Desk Analyst|'
+
+$script:testLog = @()
+function Write-Log {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '',
+        Justification = 'Test stand-in for the collector''s own Write-Log; records lines instead of printing them.')]
+    param([string]$Message, [string]$Level = 'INFO')
+    $script:testLog += "[$Level] $Message"
+}
+$script:mjCalls = @(); $script:mjHeaders = @(); $script:mjLabels = @(); $script:mjTotal = 3; $script:mjToken = 'tok-example'
+function Invoke-Json { param([string]$Uri, [string]$Label, [hashtable]$Headers)
+    $script:mjCalls += $Uri; $script:mjHeaders += ,$Headers; $script:mjLabels += $Label
+    if ($Uri -like 'https://myjobs.adp.com/public/staffing/v1/career-site/*') { return [pscustomobject]@{ name = 'examplecareers'; myJobsToken = $script:mjToken } }
+    $rows = @(1..$script:mjTotal | ForEach-Object { [pscustomobject]@{ reqId = "90000000002$_"; jobTitle = "Analyst $_" } })
+    $skip = [int]([regex]::Match($Uri, '\$skip=(\d+)').Groups[1].Value)
+    $top  = [int]([regex]::Match($Uri, '\$top=(\d+)').Groups[1].Value)
+    return [pscustomobject]@{ count = $script:mjTotal; jobRequisitions = @($rows | Select-Object -Skip $skip -First $top) }
+}
+$mjSrc = @{ Company = 'Example Port Services'; MyJobs = 'examplecareers' }
+$mj = @(Get-AdpJobs $mjSrc)
+Check 'MyJobs: ADP source with MyJobs routes here' $mj.Count 3
+Check 'MyJobs: settings read first'             ($script:mjCalls[0] -eq 'https://myjobs.adp.com/public/staffing/v1/career-site/examplecareers') $true
+Check 'MyJobs: list on my.adp.com'              ($script:mjCalls[1] -like 'https://my.adp.com/myadp_prefix/mycareer/public/staffing/v1/job-requisitions/apply-custom-filters?*') $true
+Check 'MyJobs: token sent in the header'        $script:mjHeaders[1].myjobstoken 'tok-example'
+Check 'MyJobs: no WorkforceNow call'            (@($script:mjCalls | Where-Object { $_ -like '*workforcenow*' }).Count) 0
+Check 'MyJobs: token kept out of labels and urls' (@(@($script:mjLabels) + @($script:mjCalls) | Where-Object { $_ -like '*tok-example*' }).Count) 0
+Check 'MyJobs: no warning when all read'        (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') }).Count) 0
+
+# paging: 45 postings at 20 a page is three list calls, then it stops on count
+$script:mjCalls = @(); $script:mjTotal = 45
+$mj45 = @(Get-AdpMyJobs $mjSrc)
+Check 'MyJobs paging: every posting read'       $mj45.Count 45
+Check 'MyJobs paging: stops on count'           (@($script:mjCalls | Where-Object { $_ -like '*apply-custom-filters*' }).Count) 3
+Check 'MyJobs paging: skip moves on'            (($script:mjCalls | Where-Object { $_ -like '*apply-custom-filters*' } | ForEach-Object { [regex]::Match($_, '\$skip=\d+').Value }) -join ',') '$skip=0,$skip=20,$skip=40'
+
+# no token: the source fails loudly instead of reading nothing
+$script:mjToken = ''
+$mjNo = try { $null = Get-AdpMyJobs $mjSrc; 'no error' } catch { $_.Exception.Message }
+Check 'MyJobs: no token is an error'            ($mjNo -like '*gave no myJobsToken*') $true
+Remove-Item Function:\Invoke-Json, Function:\Write-Log
+
 # ---- SOURCES CARRY THE KEYS THEIR PROVIDER READS, added 2026-11-03 -------
 # The example profile shipped a Workday entry with Dc= and an iCIMS entry with
 # Token=, but the collector reads WdHost and BaseUrl. Anyone copying them got a
@@ -1406,10 +1470,16 @@ $needs = @{
 $badSrc = @()
 foreach ($s in @($Config.Sources)) {
     if (-not $needs.ContainsKey([string]$s.Provider)) { $badSrc += "$($s.Company): unknown Provider '$($s.Provider)'"; continue }
-    $miss = @($needs[[string]$s.Provider] | Where-Object { -not $s.ContainsKey($_) -or -not $s[$_] })
+    $want = $needs[[string]$s.Provider]
+    # An ADP MyJobs site (1.13.0) is named by MyJobs alone; it has no Cid or CcId.
+    if ([string]$s.Provider -eq 'ADP' -and $s.ContainsKey('MyJobs') -and $s.MyJobs) { $want = @('MyJobs') }
+    $miss = @($want | Where-Object { -not $s.ContainsKey($_) -or -not $s[$_] })
     if ($miss.Count -gt 0) { $badSrc += "$($s.Company) ($($s.Provider)): missing $($miss -join ', ')" }
     if ([string]$s.Provider -eq 'ADP') {
         try { $null = Get-AdpHost $s } catch { $badSrc += "$($s.Company) (ADP): $($_.Exception.Message)" }
+        if ($s.ContainsKey('MyJobs') -and $s.MyJobs) {
+            try { $null = Get-AdpMyJobsTenant $s } catch { $badSrc += "$($s.Company) (ADP): $($_.Exception.Message)" }
+        }
     }
 }
 Check 'every source has its keys'  ($badSrc -join '; ')  ''
@@ -1445,6 +1515,9 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'ADP cid and ccId'       (& $u 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=00000000-0000-0000-0000-000000000000&ccId=19000101_000001&lang=en_US') "@{ Provider='ADP'; Cid='00000000-0000-0000-0000-000000000000'; CcId='19000101_000001' }"
     Check 'ADP without cid'        (& $u 'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html') 'none'
     Check 'ADP cloud host kept'    (& $u 'https://workforcenow.cloud.adp.com/mascsr/default/mdf/recruitment/recruitment.html?cid=00000000-0000-0000-0000-000000000000&ccId=19000101_000003&lang=en_US&jobId=1') "@{ Provider='ADP'; Cid='00000000-0000-0000-0000-000000000000'; CcId='19000101_000003'; AdpHost='https://workforcenow.cloud.adp.com' }"
+    Check 'ADP MyJobs site'        (& $u 'https://myjobs.adp.com/ExampleCareers/cx/job-listing') "@{ Provider='ADP'; MyJobs='examplecareers' }"
+    Check 'ADP MyJobs posting'     (& $u 'https://myjobs.adp.com/examplecareers/cx/job-details?reqId=9000000000101') "@{ Provider='ADP'; MyJobs='examplecareers' }"
+    Check 'ADP MyJobs api not a site' (& $u 'https://myjobs.adp.com/public/staffing/v1/career-site/examplecareers') 'none'
     Check 'Dayforce with board'    (& $u 'https://jobs.dayforcehcm.com/en-US/examplelogistics/CANDIDATEPORTAL/jobs/123') "@{ Provider='Dayforce'; Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }"
     Check 'Dayforce no board'      (& $u 'https://jobs.dayforcehcm.com/examplelogistics')                  "@{ Provider='Dayforce'; Namespace='examplelogistics'; Board='CANDIDATEPORTAL' }"
     Check 'Rippling board keeps case' (& $u 'https://ats.rippling.com/Example-Robotics/jobs/00000000-0000-0000-0000-000000000001')   "@{ Provider='Rippling'; Board='Example-Robotics' }"
@@ -1476,7 +1549,10 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'key: Paylocity board'       (Get-SourceKey @{ Provider='Paylocity'; BoardId='00000000-0000-0000-0000-0000000000AA' }) 'paylocity|00000000-0000-0000-0000-0000000000aa'
     Check 'name from Paylocity slug'   (Get-NameFromSource (ConvertFrom-CareersUrl 'https://recruiting.paylocity.com/recruiting/jobs/All/00000000-0000-0000-0000-0000000000aa/Example-Clinic-LLC')) 'Example Clinic LLC'
     Check 'key: ApplicantPro tenant'   (Get-SourceKey @{ Provider='ApplicantPro'; Tenant='ExampleCU' }) 'applicantpro|examplecu'
+    Check 'key: ADP MyJobs site'       (Get-SourceKey @{ Provider='ADP'; MyJobs='ExampleCareers' }) 'adp|myjobs|examplecareers'
+    Check 'key: ADP WorkforceNow cid'  (Get-SourceKey @{ Provider='ADP'; Cid='00000000-0000-0000-0000-00000000000A'; CcId='19000101_000001' }) 'adp|00000000-0000-0000-0000-00000000000a'
     Check 'name from Rippling board'   (Get-NameFromSource @{ Provider='Rippling'; Board='example-robotics' }) 'example-robotics'
+    Check 'name from ADP MyJobs site'  (Get-NameFromSource @{ Provider='ADP'; MyJobs='examplecareers' }) 'examplecareers'
     Check 'name from iCIMS host'       (Get-NameFromSource @{ Provider='iCIMS'; BaseUrl='https://careers-examplebank.icims.com' }) 'examplebank'
 
     $l = { param($x) $e = ConvertFrom-ScoutLine $x; if ($e) { '{0}|{1}' -f $e.Company, $e.Url } else { 'none' } }

@@ -9,7 +9,7 @@
     other end. Give it company names, careers URLs, or both, and for each one it:
 
       1. works out the provider and its keys from a careers URL
-         (Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce,
+         (Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow and MyJobs, Dayforce,
          Rippling, Paylocity, ApplicantPro)
       2. or, given only a company name, guesses the slug and probes the providers
          that can be probed by name (Greenhouse, Lever, Dayforce, Rippling)
@@ -157,6 +157,13 @@ function ConvertFrom-CareersUrl {
         return $null
     }
 
+    # ADP's other careers product (1.13.0): myjobs.adp.com/<name>/cx/... The name is the
+    # career site; the collector reads its settings and job list from that alone.
+    $m = [regex]::Match($u, '(?i)^https?://myjobs\.adp\.com/([a-z0-9_-]{2,64})(?:/|$|\?)')
+    if ($m.Success -and $m.Groups[1].Value.ToLower() -notin @('public', 'admin', 'assets', 'cx')) {
+        return @{ Provider = 'ADP'; MyJobs = $m.Groups[1].Value.ToLower() }
+    }
+
     # The older Dayforce form, usNN. or usrNN.dayforcehcm.com/CandidatePortal/<lang>/<namespace>/,
     # is the same board as jobs.dayforcehcm.com/<lang>/<namespace>/CANDIDATEPORTAL.
     $m = [regex]::Match($u, '(?i)^https?://usr?\d+\.dayforcehcm\.com/CandidatePortal/(?:[a-z]{2}-[a-z]{2}/)?([a-z0-9_-]+)')
@@ -228,7 +235,10 @@ function Get-SourceKey {
         'Workday'    { return 'workday|' + (& $g 'Tenant') + '|' + (& $g 'Site') }
         'iCIMS'      { return 'icims|' + (& $g 'BaseUrl') }
         'UltiPro'    { return 'ultipro|' + (& $g 'BoardId') }
-        'ADP'        { return 'adp|' + (& $g 'Cid') }
+        'ADP'        {
+            if (& $g 'MyJobs') { return 'adp|myjobs|' + (& $g 'MyJobs') }
+            return 'adp|' + (& $g 'Cid')
+        }
         'Dayforce'   {
             $b = & $g 'Board'; if (-not $b) { $b = 'candidateportal' }
             return 'dayforce|' + (& $g 'Namespace') + '|' + $b
@@ -243,7 +253,7 @@ function Get-SourceKey {
 function Format-SourceEntry {
     <# One Sources line in the profile's own style, keys in a fixed order. #>
     param([hashtable]$Src)
-    $order = @('Provider', 'Company', 'Token', 'WdHost', 'Tenant', 'Site', 'BaseUrl', 'UkgHost', 'PlcHost', 'BoardId', 'Cid', 'CcId', 'AdpHost', 'Namespace', 'Board')
+    $order = @('Provider', 'Company', 'Token', 'WdHost', 'Tenant', 'Site', 'BaseUrl', 'UkgHost', 'PlcHost', 'BoardId', 'Cid', 'CcId', 'AdpHost', 'MyJobs', 'Namespace', 'Board')
     $q = { param($s) "'" + ([string]$s -replace "'", "''") + "'" }
     $parts = foreach ($k in $order) { if ($Src.ContainsKey($k) -and $Src[$k]) { '{0}={1}' -f $k, (& $q $Src[$k]) } }
     return '@{ ' + ($parts -join '; ') + ' }'
@@ -252,7 +262,7 @@ function Format-SourceEntry {
 function Get-NameFromSource {
     <# A placeholder company name when a URL came without one: the slug or tenant. #>
     param([hashtable]$Src)
-    foreach ($k in 'NameHint', 'Token', 'Tenant', 'Namespace', 'Board') { if ($Src.ContainsKey($k) -and $Src[$k]) { return [string]$Src[$k] } }
+    foreach ($k in 'NameHint', 'Token', 'Tenant', 'MyJobs', 'Namespace', 'Board') { if ($Src.ContainsKey($k) -and $Src[$k]) { return [string]$Src[$k] } }
     if ($Src.ContainsKey('BaseUrl') -and $Src.BaseUrl) { return (([uri]$Src.BaseUrl).Host -replace '^careers-', '' -replace '\.icims\.com$', '') }
     return [string]$Src.Provider
 }
@@ -291,7 +301,7 @@ function Get-UnsupportedAtsHost {
         'PeopleAdmin'      = 'peopleadmin\.com'
         'Cornerstone'      = 'csod\.com'
         'Paycor'           = 'recruitingbypaycor\.com'
-        'ADP Recruiting'   = 'myjobs\.adp\.com|recruiting\.adp\.com'
+        'ADP Recruiting'   = 'recruiting\.adp\.com'
         'ClearCompany'     = 'clearcompany\.com'
         'HiringThing'      = 'hiringthing\.com'
         'Recruitee'        = 'recruitee\.com'
