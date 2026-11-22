@@ -40,7 +40,7 @@ That is what the test suite is for.
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs, company names or an employer list into `Sources` entries you can paste, finding careers pages on the way. See [Finding new sources](#finding-new-sources). |
 | `Find-JobSweepEmployers.ps1` | ✅ | Employer discovery. Lists employers in your zone from public datasets, for the scout to work through. See [Finding employers](#finding-employers). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 752 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 780 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -173,7 +173,7 @@ one.
 
 ## Supported providers
 
-Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow, Dayforce, Rippling,
+Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP (WorkforceNow and MyJobs), Dayforce, Rippling,
 Paylocity, ApplicantPro (isolved Talent Acquisition), and the Microsoft careers API. `JobSweep.local.example.psd1` documents where to find the token,
 tenant or board ID for each.
 
@@ -199,6 +199,8 @@ need a URL; for Paylocity it is the board URL with the GUID in it
 does not name its board. An ApplicantPro URL names its tenant in the host
 (`<tenant>.applicantpro.com`). An ADP URL on `workforcenow.cloud.adp.com` gets
 `AdpHost` in its line, because those employers are not found on the plain host.
+An ADP MyJobs URL (`myjobs.adp.com/<name>/cx/...`) gives `MyJobs='<name>'`
+instead of `Cid` and `CcId`; it is a different ADP product with its own reader.
 The older Dayforce form, `usNN.dayforcehcm.com/CandidatePortal/<lang>/<namespace>`,
 is read as the same board on `jobs.dayforcehcm.com`.
 
@@ -321,7 +323,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1504  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1560  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -329,11 +331,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  752    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  752    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  780    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  780    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1504  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1560  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -372,6 +374,19 @@ decide what ships.
 
 ## Changelog
 
+- **1.13.0** (2026-11-21): ADP MyJobs career sites.
+  - ADP's other careers product lives at `myjobs.adp.com/<name>/cx` (ADP
+    Recruiting Management) and has no WorkforceNow `cid`, so the existing ADP
+    reader could not see it. An ADP source with `MyJobs='<name>'` now reads the
+    site's public settings for its `myJobsToken`, then the job list from
+    `my.adp.com` with that token in a header, 20 a page until the site's count
+    is reached. The list carries the full description, so there is no detail
+    call. Both hosts publish no robots.txt rules.
+  - The scout and the careers-page finder turn a `myjobs.adp.com` URL into a
+    `MyJobs` line, named after the site, instead of tallying it as
+    unsupported. The source check accepts `MyJobs` in place of `Cid` and
+    `CcId`.
+  - 28 new regression cases (780).
 - **1.12.2** (2026-11-20): the careers-page finder no longer guesses a
   website from one generic word. A guess built from the name's words skips
   the first word only when three or more words are left, and never uses a
