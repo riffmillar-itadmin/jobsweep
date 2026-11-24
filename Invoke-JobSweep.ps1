@@ -183,6 +183,9 @@
     <Board>). The Posting API is closed to crawlers by robots.txt, so the board
     is read from its public career-site pages and their own paging, and each
     survivor's place, date and description from its posting page's microdata.
+    1.15.0 (2026-11-23): degree screen. DegreeScreen = drop / check / off in the
+    local profile; a degree stated with no equivalency clause is dropped, flagged
+    (the default, as before) or ignored. A misspelt value stops the run.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -215,7 +218,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.14.0'
+$JobSweepVersion = '1.15.0'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -386,7 +389,7 @@ function Merge-JobSweepProfile {
         [string[]] $KnownKeys = @(
             'TitleInclude','TitleProtect','TitleExclude',
             'LocationExclude','CommuteExclude','LocationInclude',
-            'RemoteBlock','LiftingLimitLb','ClearanceScreen','Sources','OutputRoot',
+            'RemoteBlock','LiftingLimitLb','ClearanceScreen','DegreeScreen','Sources','OutputRoot',
             'Discovery'
         )
     )
@@ -422,9 +425,11 @@ function Merge-JobSweepProfile {
     # zero candidates and a normal-looking quiet day. That is a silent wrong answer,
     # which is the worst failure class this toolset has shipped.
     # A misspelt mode would otherwise fall through to the default with no word said.
-    if ($merged.ContainsKey('ClearanceScreen') -and $merged.ClearanceScreen -notin @('drop', 'check', 'off')) {
-        throw ("ClearanceScreen must be 'drop', 'check' or 'off', not '{0}'. Checked: {1}" -f `
-               $merged.ClearanceScreen, ($ProfilePath -join ', '))
+    foreach ($modeKey in @('ClearanceScreen', 'DegreeScreen')) {
+        if ($merged.ContainsKey($modeKey) -and $merged[$modeKey] -notin @('drop', 'check', 'off')) {
+            throw ("{0} must be 'drop', 'check' or 'off', not '{1}'. Checked: {2}" -f `
+                   $modeKey, $merged[$modeKey], ($ProfilePath -join ', '))
+        }
     }
 
     $missing = @($RequireKeys | Where-Object {
@@ -693,6 +698,30 @@ function Get-DegreeFlag {
              'in lieu of|may be substituted|or a combination of education)'
     if ($Text -match $equiv) { return 'equivalency' }
     return 'hard'
+}
+
+function Get-DegreeScreen {
+    <# What a posting's degree flag (from Get-DegreeFlag) does to it. Added
+       2026-11-23 (1.15.0): two hard-degree reqs a week were reaching the board
+       with only a CHECK note.
+
+       Whether a degree with no equivalency clause is a deal-breaker is personal,
+       so the profile decides with DegreeScreen:
+         'drop'  -- the posting is screened out (it stays in screened.csv)
+         'check' -- it is kept with a CHECK note (the default, and the only
+                    behaviour before 1.15.0)
+         'off'   -- no note at all
+       Only 'hard' is acted on. 'equivalency', 'none' and 'unknown' (no text to
+       read) are never dropped. Returns 'out', 'check' or 'none'. #>
+    param([string]$Degree, [string]$Mode = '')
+    # Resolved here, not in a param default -- see Test-PhysicalDemand.
+    if (-not $Mode) {
+        $Mode = if ($Config -and $Config.ContainsKey('DegreeScreen') -and $Config.DegreeScreen) {
+                    [string]$Config.DegreeScreen } else { 'check' }
+    }
+    if ($Degree -ne 'hard' -or $Mode -eq 'off') { return 'none' }
+    if ($Mode -eq 'drop') { return 'out' }
+    return 'check'
 }
 
 function Test-LicenceRequired {
@@ -3131,11 +3160,19 @@ if (-not $SkipDetail) {
             continue
         }
         foreach ($c in $clr) { $p.Reason = ($p.Reason + ' | CHECK clearance: ' + $c.Why).Trim(' |') }
-        # A degree flag NO LONGER DROPS the lead. Get-DegreeFlag reads prose and can be
-        # wrong, and the one it killed on 2026-09-09 -- a contracts-and-licensing
-        # req, in-region and in the target title family -- is exactly
-        # the lead that must not disappear into screened.csv. Flag it and let a human read it.
-        if ($p.Degree -eq 'hard') { $p.Reason = ($p.Reason + ' | CHECK: degree stated with no equivalency clause').Trim(' |') }
+        # Degree gate. From 2026-09-09 a hard degree only flagged the lead: Get-DegreeFlag
+        # reads prose and can be wrong, and the one it killed that day -- a
+        # contracts-and-licensing req, in-region and in the target title family -- was
+        # a lead that should not have vanished. Since 1.15.0 DegreeScreen lets the
+        # profile choose; 'check' keeps that behaviour, and a dropped posting is still
+        # in screened.csv with its reason for anyone who wants to look.
+        $deg = Get-DegreeScreen $p.Degree
+        if ($deg -eq 'out') {
+            $p.Screen = 'out'
+            $p.Reason = 'degree stated with no equivalency clause'
+            continue
+        }
+        if ($deg -eq 'check') { $p.Reason = ($p.Reason + ' | CHECK: degree stated with no equivalency clause').Trim(' |') }
 
         # Developer-in-disguise, added 2026-09-10 after a university's "Senior Systems
         # Engineer" req turned out to be a developer post -- the second in a
