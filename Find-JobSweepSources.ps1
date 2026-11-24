@@ -10,7 +10,7 @@
 
       1. works out the provider and its keys from a careers URL
          (Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP WorkforceNow and MyJobs, Dayforce,
-         Rippling, Paylocity, ApplicantPro)
+         Rippling, Paylocity, ApplicantPro, SmartRecruiters)
       2. or, given only a company name, guesses the slug and probes the providers
          that can be probed by name (Greenhouse, Lever, Dayforce, Rippling)
       3. checks that the board answers, counts its postings, and counts the titles
@@ -205,6 +205,15 @@ function ConvertFrom-CareersUrl {
     if ($m.Success -and $m.Groups[1].Value.ToLower() -notin @('www', 'feeds', 'api', 'admin', 'app')) {
         return @{ Provider = 'ApplicantPro'; Tenant = $m.Groups[1].Value.ToLower() }
     }
+
+    # SmartRecruiters (1.14.0): careers.smartrecruiters.com/<Board>[/<page>] or a
+    # posting at jobs.smartrecruiters.com/<Board>/<id>-<slug>. Board names are
+    # case-sensitive (Example1), so the case in the URL is kept. The platform's
+    # own paths are not boards.
+    $m = [regex]::Match($u, '(?i)^https?://(?:careers|jobs)\.smartrecruiters\.com/([A-Za-z0-9_-]{2,80})(?:[/?#]|$)')
+    if ($m.Success -and $m.Groups[1].Value.ToLower() -notin @('oneclick-ui', 'sr-jobs', 'career-site-ui', 'api', 'static', 'assets', 'search', 'jobs')) {
+        return @{ Provider = 'SmartRecruiters'; Board = $m.Groups[1].Value }
+    }
     return $null
 }
 
@@ -246,6 +255,7 @@ function Get-SourceKey {
         'Rippling'   { return 'rippling|' + (& $g 'Board') }
         'Paylocity'  { return 'paylocity|' + (& $g 'BoardId') }
         'ApplicantPro' { return 'applicantpro|' + (& $g 'Tenant') }
+        'SmartRecruiters' { return 'smartrecruiters|' + (& $g 'Board') }
         default      { return ([string]$Src.Provider).ToLower() + '|' + (& $g 'Company') }
     }
 }
@@ -286,7 +296,6 @@ function Get-UnsupportedAtsHost {
        Found on a careers page they are reported and tallied, not probed. #>
     return [ordered]@{
         'Jobvite'          = 'jobvite\.com'
-        'SmartRecruiters'  = 'smartrecruiters\.com'
         'Paycom'           = 'paycomonline\.(net|com)'
         'Taleo'            = 'taleo\.net'
         'Oracle Cloud HCM' = 'oraclecloud\.com/hcmUI'
@@ -538,6 +547,19 @@ function Invoke-SourceProbe {
                     $r.Titles = @($jobs | Where-Object { & $prop $_ 'title' } | ForEach-Object { [string]$_.title })
                     $t = [regex]::Match($h, 'domainTitle\s*:\s*"([^"]+)"')
                     if ($t.Success) { $r.Note = "board name: $($t.Groups[1].Value)" }
+                }
+            }
+            'SmartRecruiters' {
+                # The Posting API is Disallow: / for crawlers, so the probe reads the
+                # public board page, as the collector does. Each department section
+                # says how many postings it holds; the page shows the first few.
+                $h = [string](Invoke-ScoutRequest "https://careers.smartrecruiters.com/$($Src.Board)")
+                $qty = 0; foreach ($q in [regex]::Matches($h, '\bdata-qty="(\d+)"')) { $qty += [int]$q.Groups[1].Value }
+                $titles = @([regex]::Matches($h, '(?is)<h4[^>]*job-title[^>]*>(.*?)</h4>') | ForEach-Object { ([Net.WebUtility]::HtmlDecode(($_.Groups[1].Value -replace '<[^>]+>', ''))).Trim() })
+                if ($qty -eq 0 -and $titles.Count -eq 0) { $r.Note = 'board page lists no postings (check the board name; it is case-sensitive)' }
+                else {
+                    $r.Answered = $true; $r.Postings = [math]::Max($qty, $titles.Count); $r.Titles = $titles
+                    if ($r.Postings -gt $titles.Count) { $r.Note = 'titles from the first page only' }
                 }
             }
             default { $r.Note = "not probed: run Invoke-JobSweep.ps1 -Source $($Src.Provider) -DryRun with the entry added" }

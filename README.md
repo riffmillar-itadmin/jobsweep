@@ -40,7 +40,7 @@ That is what the test suite is for.
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs, company names or an employer list into `Sources` entries you can paste, finding careers pages on the way. See [Finding new sources](#finding-new-sources). |
 | `Find-JobSweepEmployers.ps1` | ✅ | Employer discovery. Lists employers in your zone from public datasets, for the scout to work through. See [Finding employers](#finding-employers). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 780 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 825 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -174,7 +174,7 @@ one.
 ## Supported providers
 
 Greenhouse, Lever, Workday, iCIMS, UltiPro, ADP (WorkforceNow and MyJobs), Dayforce, Rippling,
-Paylocity, ApplicantPro (isolved Talent Acquisition), and the Microsoft careers API. `JobSweep.local.example.psd1` documents where to find the token,
+Paylocity, ApplicantPro (isolved Talent Acquisition), SmartRecruiters (public career-site pages), and the Microsoft careers API. `JobSweep.local.example.psd1` documents where to find the token,
 tenant or board ID for each.
 
 ## Finding new sources
@@ -193,14 +193,18 @@ slug from a name and probes Greenhouse, Lever, Dayforce and Rippling. It checks 
 board answers, counts its postings and the titles that pass your title screen,
 skips what your profile already has, and prints `@{ Provider=... }` lines to
 paste into `Sources`. It never writes to a profile. A name-based hit is a guess,
-so open the board before you add it. Workday, iCIMS, UltiPro, ADP, Paylocity and ApplicantPro
-need a URL; for Paylocity it is the board URL with the GUID in it
+so open the board before you add it. Workday, iCIMS, UltiPro, ADP, Paylocity, ApplicantPro
+and SmartRecruiters need a URL; for Paylocity it is the board URL with the GUID in it
 (`recruiting.paylocity.com/recruiting/jobs/All/<GUID>`), since a posting URL
 does not name its board. An ApplicantPro URL names its tenant in the host
 (`<tenant>.applicantpro.com`). An ADP URL on `workforcenow.cloud.adp.com` gets
 `AdpHost` in its line, because those employers are not found on the plain host.
 An ADP MyJobs URL (`myjobs.adp.com/<name>/cx/...`) gives `MyJobs='<name>'`
 instead of `Cid` and `CcId`; it is a different ADP product with its own reader.
+A SmartRecruiters board or posting URL gives `Board='<name>'`, case kept: the
+name is in the path (`careers.smartrecruiters.com/<Board>` or
+`jobs.smartrecruiters.com/<Board>/<id>-<title>`) and is often not the company
+name.
 The older Dayforce form, `usNN.dayforcehcm.com/CandidatePortal/<lang>/<namespace>`,
 is read as the same board on `jobs.dayforcehcm.com`.
 
@@ -323,7 +327,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1560  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1650  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -331,11 +335,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  780    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  780    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  825    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  825    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1560  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1650  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -374,6 +378,24 @@ decide what ships.
 
 ## Changelog
 
+- **1.14.0** (2026-11-23): a SmartRecruiters provider.
+  - SmartRecruiters' Posting API (`api.smartrecruiters.com`) is closed to
+    crawlers: its robots.txt allows only LinkedInBot. The career site
+    (`careers.smartrecruiters.com/<Board>`) has no robots.txt rules and builds
+    its board on the server, so the collector reads that page instead and
+    never calls the API. Postings are grouped by department; the reader
+    follows the board's own paging, the next page of groups and each group's
+    "more" link, until every group holds the count it states, and warns when
+    it falls short. The list has titles only, so each posting that passes the
+    title screen gets its place, date and description from its own page's
+    schema.org microdata, and the location screen runs again.
+  - Profile key: `Board`, case-sensitive and often not the company name
+    (`Example1`); copy it from a posting link,
+    `jobs.smartrecruiters.com/<Board>/<id>-<title>`.
+  - The scout reads `careers.` and `jobs.smartrecruiters.com` URLs and probes
+    the board page; the careers-page finder no longer tallies SmartRecruiters
+    as unsupported.
+  - 45 new regression cases (825).
 - **1.13.0** (2026-11-21): ADP MyJobs career sites.
   - ADP's other careers product lives at `myjobs.adp.com/<name>/cx` (ADP
     Recruiting Management) and has no WorkforceNow `cid`, so the existing ADP

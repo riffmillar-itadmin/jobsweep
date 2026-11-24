@@ -30,7 +30,8 @@
 
 .PARAMETER Source
     Run only one provider: Greenhouse, Lever, Workday, Microsoft, ADP, iCIMS,
-    UltiPro, Dayforce, Rippling, Paylocity or ApplicantPro. Omit for all.
+    UltiPro, Dayforce, Rippling, Paylocity, ApplicantPro or SmartRecruiters.
+    Omit for all.
 
 .PARAMETER DryRun
     Fetch, screen and report, but do NOT update the seen-state file. Safe to re-run.
@@ -178,6 +179,10 @@
     1.13.0 (2026-11-21): ADP MyJobs career sites (myjobs.adp.com/<name>/cx). An
     ADP source with MyJobs='<name>' reads the site's settings for its token and
     the job list from my.adp.com; the scout and finder recognise the URL.
+    1.14.0 (2026-11-23): SmartRecruiters provider (careers.smartrecruiters.com/
+    <Board>). The Posting API is closed to crawlers by robots.txt, so the board
+    is read from its public career-site pages and their own paging, and each
+    survivor's place, date and description from its posting page's microdata.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -188,7 +193,7 @@ param(
     # Resolved after the profiles load: this parameter, else OutputRoot in a
     # profile, else the folder this script lives in.
     [string] $OutputRoot,
-    [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro','Dayforce','Rippling','Paylocity','ApplicantPro')]
+    [ValidateSet('Greenhouse','Lever','Workday','Microsoft','ADP','iCIMS','UltiPro','Dayforce','Rippling','Paylocity','ApplicantPro','SmartRecruiters')]
     [string] $Source,
     [switch] $DryRun,
     [switch] $SkipDetail,
@@ -210,7 +215,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.13.0'
+$JobSweepVersion = '1.14.0'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -2738,6 +2743,199 @@ function Add-ApplicantProDetail {
     Start-Sleep -Milliseconds $script:Throttle
 }
 
+# ---- SmartRecruiters ---------------------------------------------------------
+# careers.smartrecruiters.com/<Board>, added 1.14.0. SmartRecruiters' public
+# Posting API (api.smartrecruiters.com) is closed to crawlers: its robots.txt
+# has "Disallow: /" for every agent but LinkedInBot, so this provider never
+# calls it. The career site has no robots.txt rules, and it builds its board
+# on the server: the page lists every posting as a link to
+# jobs.smartrecruiters.com/<Board>/<postingId>-<slug>, grouped by department.
+# The board's own script loads the rest the same way, as HTML fragments:
+#   more groups:      <data-more>?page=N, for N from data-page + 1 while N < data-groups-pages
+#   more in a group:  <the group's data-more>?type=<data-type>&value=<data-value>&page=N
+# Each group says how many postings it holds (data-qty), so the reader knows
+# when it has them all. The list gives only titles; each survivor's own page
+# gives the place, date and description as schema.org microdata.
+
+function Get-SmartRecruitersBoard {
+    <# The board name from a source, as given (SmartRecruiters names are case-
+       sensitive, Example1 for instance). Throws on anything that is not a
+       plain name, so a bad entry fails loudly. #>
+    param($Src)
+    $b = ''
+    if ($Src.ContainsKey('Board') -and $Src.Board) { $b = ([string]$Src.Board).Trim() }
+    if ($b -notmatch '^[A-Za-z0-9_-]{2,80}$') { throw "SmartRecruiters Board '$b' is not a board name (letters, digits, - and _)" }
+    return $b
+}
+
+function ConvertFrom-SmartRecruitersBoard {
+    <# A board page, or one of its fragments, reduced to its postings and the
+       paging data the board's script reads. Returns @{ Jobs; Groups; More;
+       Pages; Page }: Jobs is @{ Id; Title; Url } once per posting id, Groups is
+       @{ Name; Qty; Ids; More; Type; Value } per department section, and More,
+       Pages and Page come from the js-openings-load block (empty or 0 when the
+       HTML has none). Pure. #>
+    param([string]$Html, [string]$Board)
+    $Html = [string]$Html
+    $jobs = [System.Collections.Generic.List[object]]::new()
+    $seen = @{}
+    $linkRx = '(?is)<a[^>]+href="(https?://jobs\.smartrecruiters\.com/' + [regex]::Escape($Board) + '/(\d{6,})(?:-[^"]*)?)"[^>]*>(.*?)</a>'
+    foreach ($m in [regex]::Matches($Html, $linkRx)) {
+        $id = $m.Groups[2].Value
+        if ($seen.ContainsKey($id)) { continue }
+        $inner = $m.Groups[3].Value
+        $t = [regex]::Match($inner, '(?is)<h4[^>]*>(.*?)</h4>')
+        $title = if ($t.Success) { Convert-HtmlToText $t.Groups[1].Value } else { Convert-HtmlToText $inner }
+        if ([string]::IsNullOrWhiteSpace($title)) { continue }
+        $seen[$id] = $true
+        $jobs.Add(@{ Id = $id; Title = $title.Trim(); Url = [Net.WebUtility]::HtmlDecode($m.Groups[1].Value) })
+    }
+    $groups = @()
+    foreach ($s in [regex]::Matches($Html, '(?is)<section\b[^>]*\bdata-qty="(\d+)"[^>]*>.*?</section>')) {
+        $sec = $s.Value
+        $name = ''
+        $n = [regex]::Match($sec, '(?is)class="[^"]*opening-title[^"]*"[^>]*>(.*?)</h3>')
+        if ($n.Success) { $name = Convert-HtmlToText $n.Groups[1].Value }
+        $more = ''; $type = ''; $value = ''
+        $b = [regex]::Match($sec, '(?is)<[a-z]+\b[^>]*\bdata-more="([^"]+)"[^>]*>')
+        if ($b.Success) {
+            $more = [Net.WebUtility]::HtmlDecode($b.Groups[1].Value)
+            $tag = $b.Value
+            if ($tag -match '\bdata-type="([^"]*)"') { $type = $Matches[1] }
+            if ($tag -match '\bdata-value="([^"]*)"') { $value = $Matches[1] }
+        }
+        $ids = @([regex]::Matches($sec, '(?i)jobs\.smartrecruiters\.com/' + [regex]::Escape($Board) + '/(\d{6,})') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
+        $groups += ,@{ Name = $name; Qty = [int]$s.Groups[1].Value; Ids = $ids; More = $more; Type = $type; Value = $value }
+    }
+    $more = ''; $pages = 0; $page = 0
+    $l = [regex]::Match($Html, '(?is)<div\b[^>]*class="[^"]*js-openings-load[^"]*"[^>]*>|<div\b[^>]*data-groups-pages="[^"]*"[^>]*>')
+    if ($l.Success) {
+        if ($l.Value -match '\bdata-more="([^"]+)"') { $more = [Net.WebUtility]::HtmlDecode($Matches[1]) }
+        if ($l.Value -match '\bdata-groups-pages="(\d+)"') { $pages = [int]$Matches[1] }
+        if ($l.Value -match '\bdata-page="(\d+)"') { $page = [int]$Matches[1] }
+    }
+    return @{ Jobs = @($jobs); Groups = @($groups); More = $more; Pages = $pages; Page = $page }
+}
+
+function Get-SmartRecruitersUrl {
+    <# A board-relative path (/Board/api/groups) as a full careers-host URL with
+       its query appended. Only careers.smartrecruiters.com paths are followed. Pure. #>
+    param([string]$Path, [string]$Query)
+    if ($Path -match '^(?i)https?://') {
+        if (([uri]$Path).Host -ne 'careers.smartrecruiters.com') { throw "not a careers.smartrecruiters.com path: $Path" }
+        $u = $Path
+    } else { $u = 'https://careers.smartrecruiters.com/' + $Path.TrimStart('/') }
+    $sep = if ($u.Contains('?')) { '&' } else { '?' }
+    return $u + $sep + $Query
+}
+
+function ConvertFrom-SmartRecruitersJobPage {
+    <# A posting page reduced to @{ Title; Location; Posted; Content } from its
+       schema.org microdata, or $null when it has no title. Location is
+       "City, Region" in the United States (or with no country), "City, Country"
+       elsewhere, with Remote in front for a remote workplace type. Content is
+       the job-section text: company, job description, qualifications and
+       additional information. Pure. #>
+    param([string]$Html)
+    $Html = [string]$Html
+    $t = [regex]::Match($Html, '(?is)<h1[^>]*itemprop="title"[^>]*>(.*?)</h1>')
+    if (-not $t.Success) { return $null }
+    $title = Convert-HtmlToText $t.Groups[1].Value
+    if ([string]::IsNullOrWhiteSpace($title)) { return $null }
+    $meta = {
+        param($k)
+        $m = [regex]::Match($Html, '(?is)<meta[^>]*itemprop="' + $k + '"[^>]*content="([^"]*)"')
+        if ($m.Success) { ([Net.WebUtility]::HtmlDecode($m.Groups[1].Value)).Trim() } else { '' }
+    }
+    $city = & $meta 'addressLocality'; $region = & $meta 'addressRegion'; $country = & $meta 'addressCountry'
+    $place = @()
+    if ($city) { $place += $city }
+    if (-not $country -or $country -match '^(?i)(US|USA|United States( of America)?)$') { if ($region) { $place += $region } }
+    else { $place += $country }
+    $loc = ($place -join ', ')
+    $wt = [regex]::Match($Html, '(?i)workplaceType="([^"]*)"')
+    if ($wt.Success -and $wt.Groups[1].Value -match '(?i)^remote') { $loc = (@('Remote', $loc) | Where-Object { $_ }) -join ' | ' }
+    $posted = ''
+    $dp = & $meta 'datePosted'
+    if ($dp -match '^(\d{4}-\d{2}-\d{2})') { $posted = $Matches[1] }
+    $parts = @([regex]::Matches($Html, '(?is)<section\b[^>]*class="[^"]*job-section[^"]*"[^>]*>(.*?)</section>') | ForEach-Object { Convert-HtmlToText $_.Groups[1].Value } | Where-Object { $_ })
+    return @{ Title = $title.Trim(); Location = $loc; Posted = $posted; Content = ($parts -join "`n`n") }
+}
+
+function Get-SmartRecruitersJobs {
+    param($Src)
+    $board = Get-SmartRecruitersBoard $Src
+    $all = [ordered]@{}
+    $groups = @()
+    $add = { param($r) foreach ($j in @($r.Jobs)) { if (-not $all.Contains($j.Id)) { $all[$j.Id] = $j } } }
+
+    $first = ConvertFrom-SmartRecruitersBoard (Invoke-Html "https://careers.smartrecruiters.com/$board") $board
+    & $add $first
+    $groups += @($first.Groups)
+    # More groups: the script asks for page data-page + 1 while it is below data-groups-pages.
+    if ($first.More) {
+        for ($p = $first.Page + 1; $p -lt $first.Pages -and $p -le 50; $p++) {
+            Start-Sleep -Milliseconds $script:Throttle
+            $r = ConvertFrom-SmartRecruitersBoard (Invoke-Html (Get-SmartRecruitersUrl $first.More "page=$p")) $board
+            if ($r.Jobs.Count -eq 0 -and $r.Groups.Count -eq 0) { break }
+            & $add $r
+            $groups += @($r.Groups)
+        }
+    }
+    # More in a group: a group that shows fewer postings than its data-qty has a "more" link.
+    $qty = 0
+    foreach ($g in $groups) {
+        $qty += $g.Qty
+        $have = @($g.Ids).Count
+        if ($have -ge $g.Qty -or -not $g.More -or -not $g.Value) { continue }
+        $type = if ($g.Type) { $g.Type } else { 'department' }
+        for ($p = 1; $have -lt $g.Qty -and $p -le 50; $p++) {
+            Start-Sleep -Milliseconds $script:Throttle
+            $q = 'type=' + [uri]::EscapeDataString($type) + '&value=' + [uri]::EscapeDataString($g.Value) + "&page=$p"
+            $r = ConvertFrom-SmartRecruitersBoard (Invoke-Html (Get-SmartRecruitersUrl $g.More $q)) $board
+            $before = $all.Count
+            & $add $r
+            $gained = $all.Count - $before
+            if ($gained -le 0) { break }
+            $have += $gained
+        }
+    }
+    if ($qty -gt $all.Count) {
+        Write-Log ("   SmartRecruiters {0}: the board's groups say {1} postings but {2} were read" -f $Src.Company, $qty, $all.Count) 'WARN'
+    }
+    $out = @()
+    foreach ($j in $all.Values) {
+        $url = "https://jobs.smartrecruiters.com/$board/$($j.Id)"
+        $p = New-Posting -Source 'SmartRecruiters' -Company $Src.Company -Title $j.Title `
+                 -Location '' -Url $j.Url -ReqId $j.Id -Posted '' -Content ''
+        $out += ($p | Add-Member -NotePropertyName DetailPath -NotePropertyValue $url -PassThru)
+    }
+    Write-Log ("   SmartRecruiters {0}: {1} postings in {2} groups (board {3})" -f $Src.Company, $out.Count, @($groups).Count, $board)
+    return $out
+}
+
+function Add-SmartRecruitersDetail {
+    <# Place, date and description from the posting's own page. The list has
+       none of them, so the location screen runs again after this. #>
+    param($Posting)
+    try {
+        $d = ConvertFrom-SmartRecruitersJobPage (Invoke-Html $Posting.DetailPath)
+        if ($null -eq $d) {
+            Write-Log "  detail for $($Posting.Company) / $($Posting.Title) had no title in its page" 'WARN'
+        } else {
+            $Posting.Content = $d.Content
+            if ($d.Location) { $Posting.Location = $d.Location }
+            if ($d.Posted -and -not $Posting.Posted) { $Posting.Posted = $d.Posted }
+            $Posting.Pay          = Get-PayRange $d.Content
+            $Posting.Degree       = Get-DegreeFlag $Posting.Content
+            $Posting.NeedsLicence = [bool](Test-LicenceRequired $Posting.Content)
+        }
+    } catch {
+        Write-Log "  detail fetch failed for $($Posting.Company) / $($Posting.Title): $($_.Exception.Message)" 'WARN'
+    }
+    Start-Sleep -Milliseconds $script:Throttle
+}
+
 # ============================================================================
 #  MAIN
 # ============================================================================
@@ -2843,6 +3041,7 @@ foreach ($src in $sources) {
             'Rippling'   { $got = @(Get-RipplingJobs   $src) }
             'Paylocity'  { $got = @(Get-PaylocityJobs  $src) }
             'ApplicantPro' { $got = @(Get-ApplicantProJobs $src) }
+            'SmartRecruiters' { $got = @(Get-SmartRecruitersJobs $src) }
         }
         Write-Log "   $($got.Count) postings"
         $all += $got
@@ -2899,6 +3098,7 @@ if (-not $SkipDetail) {
                 'Rippling'  { Add-RipplingDetail  $p }
                 'Paylocity' { Add-PaylocityDetail $p }
                 'ApplicantPro' { Add-ApplicantProDetail $p }
+                'SmartRecruiters' { Add-SmartRecruitersDetail $p }
             }
         }
     }
