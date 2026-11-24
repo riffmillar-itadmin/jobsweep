@@ -179,6 +179,7 @@ Discovery = @{
 #   Rippling    ats.rippling.com/<Board>/jobs           -- Board is in the URL, case and all
 #   Paylocity   recruiting.paylocity.com/recruiting/jobs/All/<BoardId> -- the GUID in the board URL
 #   ApplicantPro <Tenant>.applicantpro.com/jobs/          -- Tenant is the subdomain
+#   SmartRecruiters careers.smartrecruiters.com/<Board>  -- Board is in the URL, case and all
 #
 # Start with five or six employers you would actually work for, confirm the
 # sweep returns their postings, then grow the list.
@@ -225,6 +226,12 @@ Sources = @(
     # ---- ApplicantPro (isolved Talent Acquisition): <Tenant>.applicantpro.com/core/jobs/<domainId>
     # The collector reads the domain id off the /jobs/ page; DomainId='<n>' pins it if needed.
     @{ Provider='ApplicantPro'; Company='Example Credit Union'; Tenant='examplecu' }
+
+    # ---- SmartRecruiters: the public board page careers.smartrecruiters.com/<Board>
+    # (the Posting API on api.smartrecruiters.com is closed to crawlers by robots.txt).
+    # Board is case-sensitive and may differ from the company name, Example1 for
+    # instance: copy it from a posting link, jobs.smartrecruiters.com/<Board>/<id>-<title>.
+    @{ Provider='SmartRecruiters'; Company='Example Outfitters'; Board='ExampleOutfitters1' }
 )
 
 }

@@ -126,7 +126,9 @@ $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteT
           'Get-MicrosoftQuery','Get-MicrosoftGapText','Get-MicrosoftJobs','Get-RetryCoolOffWait',
           'Invoke-MicrosoftRetryPass','Get-WebTimeoutParameter','Get-GiveUpLevel',
           'Get-HttpFailure','Test-HttpNotFound','Get-AdpHost','Get-AdpOtherHost','Get-AdpJobs',
-          'Get-AdpMyJobsTenant','ConvertFrom-AdpMyJobsRequisition','Get-AdpMyJobs')
+          'Get-AdpMyJobsTenant','ConvertFrom-AdpMyJobsRequisition','Get-AdpMyJobs',
+          'Get-SmartRecruitersBoard','ConvertFrom-SmartRecruitersBoard','Get-SmartRecruitersUrl',
+          'ConvertFrom-SmartRecruitersJobPage','Get-SmartRecruitersJobs','Add-SmartRecruitersDetail')
 $parts = @()
 
 $assign = @($ast.FindAll({ param($n)
@@ -1322,6 +1324,112 @@ Check 'ApplicantPro failover: log says how'         (@($script:testLog | Where-O
 $script:apListFails = $false
 Remove-Item Function:\Invoke-Html, Function:\Invoke-Json, Function:\Write-Log
 
+# ---- SMARTRECRUITERS, added 1.14.0 ---------------------------------------
+# The Posting API is closed to crawlers, so the board is read from its public
+# career-site page: postings grouped by department, more groups behind
+# <data-more>?page=N, and more postings in a group behind the group's own
+# data-more with type, value and page. Fixtures are trimmed copies of that
+# markup with invented postings.
+Write-Host "`n-- SmartRecruiters: board page, its paging, posting microdata --"
+$srLi = { param($id, $title) "<li class=""opening-job job""><a href=""https://jobs.smartrecruiters.com/ExampleOutfitters1/$id-$($title.ToLower() -replace '[^a-z]+','-')"" class=""link--block details js-job-ad-link""><h4 class=""details-title job-title"">$title</h4><p class=""details-desc job-desc""><span>Full-time</span></p></a></li>" }
+$srBoard = '<div class="openings-body js-openings"><div data-groups-pages="2" data-page="0" data-more="/ExampleOutfitters1/api/groups" class="js-openings-load">' +
+    '<section data-qty="2" class="openings-section opening opening--grouped js-group"><header><h3 class="opening-title title">Retail</h3></header><ul class="opening-jobs js-group-list">' +
+    (& $srLi '744000000000101' 'Store Associate') + (& $srLi '744000000000102' 'Store Lead') + '</ul></section>' +
+    '<section data-qty="3" class="openings-section opening opening--grouped js-group"><header><h3 class="opening-title title">Information Technology</h3></header><ul class="opening-jobs js-group-list">' +
+    (& $srLi '744000000000201' 'Systems Administrator') + (& $srLi '744000000000202' 'IT Support Specialist &amp; Trainer') +
+    '<li class="js-more-container"><a href="#" class="js-more" data-page="0" data-value="5100001" data-type="department" data-more="/ExampleOutfitters1/api/more">Show more</a></li></ul></section>' +
+    '</div></div>'
+$srGroups1 = '<section data-qty="1" class="openings-section opening opening--grouped js-group"><header><h3 class="opening-title title">Finance</h3></header><ul class="opening-jobs js-group-list">' +
+    (& $srLi '744000000000301' 'Payroll Analyst') + '</ul></section>'
+$srMore1 = (& $srLi '744000000000203' 'Network Engineer') + (& $srLi '744000000000201' 'Systems Administrator')
+$srJob = '<main><h1 class="job-title spl-text-h3" itemprop="title">Systems Administrator</h1><ul class="job-details">' +
+    '<li itemprop="jobLocation"><span itemprop="address"><spl-job-location formattedAddress="Harborview, WM, United States" workplaceType="hybrid"></spl-job-location>' +
+    '<meta itemprop="addressCountry" content="United States"><meta itemprop="addressLocality" content="Harborview"><meta itemprop="addressRegion" content="WM"></span></li></ul>' +
+    '<meta itemprop="datePosted" content="2026-11-02T18:58:55.543Z"><div class="job-sections"><div itemprop="description">' +
+    '<section class="job-section" id="st-companyDescription"><h2 class="title">Company Description</h2><div class="wysiwyg"><p>Example Outfitters sells gear.</p></div></section>' +
+    '<section class="job-section" id="st-jobDescription"><h2 class="title">Job Description</h2><div class="wysiwyg"><p>Run Intune &amp; Entra ID.</p><p>Pay: $70,000 - $80,000 per year.</p></div></section>' +
+    '</div></div></main>'
+
+Check 'SR board name kept as given'   (Get-SmartRecruitersBoard @{ Board = ' ExampleOutfitters1 ' }) 'ExampleOutfitters1'
+$srBad = try { Get-SmartRecruitersBoard @{ Board = 'Example/../x' }; 'accepted' } catch { 'refused' }
+Check 'SR board name with a slash refused' $srBad 'refused'
+$srNone = try { Get-SmartRecruitersBoard @{ Company = 'x' }; 'accepted' } catch { 'refused' }
+Check 'SR missing board refused'      $srNone 'refused'
+
+$sb = ConvertFrom-SmartRecruitersBoard $srBoard 'ExampleOutfitters1'
+Check 'SR board: postings read'       (($sb.Jobs | ForEach-Object Title) -join ', ') 'Store Associate, Store Lead, Systems Administrator, IT Support Specialist & Trainer'
+Check 'SR board: id from the link'    $sb.Jobs[2].Id '744000000000201'
+Check 'SR board: link kept'           $sb.Jobs[2].Url 'https://jobs.smartrecruiters.com/ExampleOutfitters1/744000000000201-systems-administrator'
+Check 'SR board: groups and counts'   (($sb.Groups | ForEach-Object { '{0}={1}/{2}' -f $_.Name, @($_.Ids).Count, $_.Qty }) -join ', ') 'Retail=2/2, Information Technology=2/3'
+Check 'SR board: group more link'     ('{0}|{1}|{2}' -f $sb.Groups[1].More, $sb.Groups[1].Type, $sb.Groups[1].Value) '/ExampleOutfitters1/api/more|department|5100001'
+Check 'SR board: groups paging'       ('{0}|{1}|{2}' -f $sb.More, $sb.Pages, $sb.Page) '/ExampleOutfitters1/api/groups|2|0'
+Check 'SR board: other board ignored' (ConvertFrom-SmartRecruitersBoard (& $srLi '744000000000999' 'Elsewhere') 'OtherBoard').Jobs.Count 0
+Check 'SR board: fragment of li only' ((ConvertFrom-SmartRecruitersBoard $srMore1 'ExampleOutfitters1').Jobs.Count) 2
+Check 'SR board: empty page'          ((ConvertFrom-SmartRecruitersBoard '' 'ExampleOutfitters1').Jobs.Count) 0
+Check 'SR url: board path'            (Get-SmartRecruitersUrl '/ExampleOutfitters1/api/groups' 'page=1') 'https://careers.smartrecruiters.com/ExampleOutfitters1/api/groups?page=1'
+$srOff = try { Get-SmartRecruitersUrl 'https://api.smartrecruiters.com/v1/companies/x/postings' 'page=1'; 'followed' } catch { 'refused' }
+Check 'SR url: API host never followed' $srOff 'refused'
+
+$sj = ConvertFrom-SmartRecruitersJobPage $srJob
+Check 'SR page: title'                $sj.Title 'Systems Administrator'
+Check 'SR page: US place is city, region' $sj.Location 'Harborview, WM'
+Check 'SR page: hybrid stays a place' ($sj.Location -notlike 'Remote*') $true
+Check 'SR page: date only'            $sj.Posted '2026-11-02'
+Check 'SR page: sections as text'     ($sj.Content -like 'Company Description*Example Outfitters sells gear.*Run Intune & Entra ID.*') $true
+Check 'SR page: abroad is city, country' (ConvertFrom-SmartRecruitersJobPage ($srJob -replace 'content="United States"', 'content="Eastland"' -replace 'content="Harborview"', 'content="Northport"')).Location 'Northport, Eastland'
+Check 'SR page: remote in front'      (ConvertFrom-SmartRecruitersJobPage ($srJob -replace 'workplaceType="hybrid"', 'workplaceType="remote"')).Location 'Remote | Harborview, WM'
+Check 'SR page: no title is null'     ($null -eq (ConvertFrom-SmartRecruitersJobPage '<main>nothing</main>')) $true
+
+$script:testLog = @()
+function Write-Log {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '',
+        Justification = 'Test stand-in for the collector''s own Write-Log; records lines instead of printing them.')]
+    param([string]$Message, [string]$Level = 'INFO')
+    $script:testLog += "[$Level] $Message"
+}
+$script:srCalls = @(); $script:srShort = $false
+function Invoke-Html { param([string]$Uri)
+    $script:srCalls += $Uri
+    switch -Wildcard ($Uri) {
+        'https://careers.smartrecruiters.com/ExampleOutfitters1' { return $srBoard }
+        '*/api/groups?page=1' { return $srGroups1 }
+        '*/api/more?type=department&value=5100001&page=1' { if ($script:srShort) { return '' } else { return $srMore1 } }
+        '*/744000000000201' { return $srJob }
+    }
+    throw "HTTP 404 from the fake page $Uri"
+}
+$script:Throttle = 0
+$srSrc = @{ Company = 'Example Outfitters'; Board = 'ExampleOutfitters1' }
+$sr = @(Get-SmartRecruitersJobs $srSrc)
+Check 'SR: every group read'          $sr.Count 6
+Check 'SR: board, groups page, group more' ($script:srCalls -join ' ') 'https://careers.smartrecruiters.com/ExampleOutfitters1 https://careers.smartrecruiters.com/ExampleOutfitters1/api/groups?page=1 https://careers.smartrecruiters.com/ExampleOutfitters1/api/more?type=department&value=5100001&page=1'
+Check 'SR: no page past data-groups-pages' (@($script:srCalls | Where-Object { $_ -like '*groups?page=2' }).Count) 0
+Check 'SR: never the Posting API'     (@($script:srCalls | Where-Object { $_ -like '*api.smartrecruiters.com*' }).Count) 0
+Check 'SR: key by posting id'         $sr[2].Key 'SmartRecruiters|744000000000201'
+Check 'SR: url is the posting link'   $sr[2].Url 'https://jobs.smartrecruiters.com/ExampleOutfitters1/744000000000201-systems-administrator'
+Check 'SR: detail is the posting page' $sr[2].DetailPath 'https://jobs.smartrecruiters.com/ExampleOutfitters1/744000000000201'
+Check 'SR: no place before detail'    $sr[2].Location ''
+Check 'SR: unknown place passes screen' (Test-LocationMatch $sr[2].Location).Ok $true
+Check 'SR: counts match, no warning'  (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') }).Count) 0
+Check 'SR: log names groups and board' (@($script:testLog | Where-Object { $_ -like '*SmartRecruiters Example Outfitters: 6 postings in 3 groups (board ExampleOutfitters1)*' }).Count) 1
+
+$script:srShort = $true; $script:testLog = @(); $script:srCalls = @()
+$srS = @(Get-SmartRecruitersJobs $srSrc)
+Check 'SR: short read still returns'  $srS.Count 5
+Check 'SR: short read is a warning'   (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like "*the board's groups say 6 postings but 5 were read*" }).Count) 1
+$script:srShort = $false
+
+Add-SmartRecruitersDetail $sr[2]
+Check 'SR detail: place filled'       $sr[2].Location 'Harborview, WM'
+Check 'SR detail: date filled'        $sr[2].Posted '2026-11-02'
+Check 'SR detail: pay from the text'  $sr[2].Pay '$70,000 - $80,000 per year'
+Check 'SR detail: text filled'        ($sr[2].Content -like '*Run Intune & Entra ID.*') $true
+$script:testLog = @()
+Add-SmartRecruitersDetail $sr[0]
+Check 'SR detail: failure is a warning' (@($script:testLog | Where-Object { $_.StartsWith('[WARN]') -and $_ -like '*detail fetch failed for Example Outfitters / Store Associate*' }).Count) 1
+Check 'SR detail: failure keeps row'  $sr[0].Title 'Store Associate'
+Remove-Item Function:\Invoke-Html, Function:\Write-Log
+
 # ---- ADP: TWO HOSTS, added 1.9.1 -------------------------------------------
 # Some WorkforceNow employers live on workforcenow.cloud.adp.com and get a 404
 # from workforcenow.adp.com. AdpHost picks the host; a 404 on the first page
@@ -1465,7 +1573,7 @@ Write-Host "`n-- SOURCES: every entry has the keys its provider reads --"
 $needs = @{
     Greenhouse = @('Token'); Lever = @('Token'); Workday = @('WdHost', 'Tenant', 'Site'); iCIMS = @('BaseUrl')
     UltiPro = @('Tenant', 'BoardId'); ADP = @('Cid', 'CcId'); Dayforce = @('Namespace'); Microsoft = @('Queries')
-    Rippling = @('Board'); Paylocity = @('BoardId'); ApplicantPro = @('Tenant')
+    Rippling = @('Board'); Paylocity = @('BoardId'); ApplicantPro = @('Tenant'); SmartRecruiters = @('Board')
 }
 $badSrc = @()
 foreach ($s in @($Config.Sources)) {
@@ -1480,6 +1588,9 @@ foreach ($s in @($Config.Sources)) {
         if ($s.ContainsKey('MyJobs') -and $s.MyJobs) {
             try { $null = Get-AdpMyJobsTenant $s } catch { $badSrc += "$($s.Company) (ADP): $($_.Exception.Message)" }
         }
+    }
+    if ([string]$s.Provider -eq 'SmartRecruiters') {
+        try { $null = Get-SmartRecruitersBoard $s } catch { $badSrc += "$($s.Company) (SmartRecruiters): $($_.Exception.Message)" }
     }
 }
 Check 'every source has its keys'  ($badSrc -join '; ')  ''
@@ -1532,6 +1643,9 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'ApplicantPro openings'    (& $u 'https://www.applicantpro.com/openings/examplecu/jobs/9100002') "@{ Provider='ApplicantPro'; Tenant='examplecu' }"
     Check 'ApplicantPro www is not a tenant' (& $u 'https://www.applicantpro.com/pricing')         'none'
     Check 'ApplicantPro feeds is not a tenant' (& $u 'https://feeds.applicantpro.com/site_map_index.xml') 'none'
+    Check 'SmartRecruiters board page' (& $u 'https://careers.smartrecruiters.com/ExampleOutfitters1/corporate-positions') "@{ Provider='SmartRecruiters'; Board='ExampleOutfitters1' }"
+    Check 'SmartRecruiters posting'    (& $u 'https://jobs.smartrecruiters.com/ExampleOutfitters1/744000000000201-systems-administrator?trid=x') "@{ Provider='SmartRecruiters'; Board='ExampleOutfitters1' }"
+    Check 'SmartRecruiters app path is not a board' (& $u 'https://jobs.smartrecruiters.com/oneclick-ui/company/x/job/1') 'none'
     Check 'unknown site'           (& $u 'https://www.example.com/careers')                                'none'
     Check 'blank URL'              (& $u '')                                                               'none'
 
@@ -1549,6 +1663,7 @@ if (Test-Path -LiteralPath $scoutPath) {
     Check 'key: Paylocity board'       (Get-SourceKey @{ Provider='Paylocity'; BoardId='00000000-0000-0000-0000-0000000000AA' }) 'paylocity|00000000-0000-0000-0000-0000000000aa'
     Check 'name from Paylocity slug'   (Get-NameFromSource (ConvertFrom-CareersUrl 'https://recruiting.paylocity.com/recruiting/jobs/All/00000000-0000-0000-0000-0000000000aa/Example-Clinic-LLC')) 'Example Clinic LLC'
     Check 'key: ApplicantPro tenant'   (Get-SourceKey @{ Provider='ApplicantPro'; Tenant='ExampleCU' }) 'applicantpro|examplecu'
+    Check 'key: SmartRecruiters board' (Get-SourceKey @{ Provider='SmartRecruiters'; Board='ExampleOutfitters1' }) 'smartrecruiters|exampleoutfitters1'
     Check 'key: ADP MyJobs site'       (Get-SourceKey @{ Provider='ADP'; MyJobs='ExampleCareers' }) 'adp|myjobs|examplecareers'
     Check 'key: ADP WorkforceNow cid'  (Get-SourceKey @{ Provider='ADP'; Cid='00000000-0000-0000-0000-00000000000A'; CcId='19000101_000001' }) 'adp|00000000-0000-0000-0000-00000000000a'
     Check 'name from Rippling board'   (Get-NameFromSource @{ Provider='Rippling'; Board='example-robotics' }) 'example-robotics'
