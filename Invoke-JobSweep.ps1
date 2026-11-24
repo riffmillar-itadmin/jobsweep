@@ -186,6 +186,9 @@
     1.15.0 (2026-11-23): degree screen. DegreeScreen = drop / check / off in the
     local profile; a degree stated with no equivalency clause is dropped, flagged
     (the default, as before) or ignored. A misspelt value stops the run.
+    1.15.1 (2026-11-23): an asset-manager title that TitleProtect kept is dropped
+    after the detail fetch when it is about property, not IT: housing or real-
+    estate words in the title, or two or more in the text with no IT asset words.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -218,7 +221,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.15.0'
+$JobSweepVersion = '1.15.1'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -1125,6 +1128,48 @@ function Test-ComplianceTitleOnly {
         if ($Title -match "(?i)$p") { return $false }
     }
     return $true
+}
+
+function Test-PropertyAssetManager {
+    <# Returns the property words that show an asset-manager title is about real
+       estate, not IT; empty when it is not, or cannot be told. Added 2026-11-23
+       (1.15.1) after "Affordable Housing - Asset Manager" reached the board on
+       TitleProtect 'asset manager', which exists for IT and software asset managers.
+
+       Only titles in the asset-management family are judged. A title that names
+       IT (IT, software, hardware, ITAM, licensing, technology) is never judged.
+       A property word in the TITLE is enough. In the TEXT it takes two different
+       property words and no IT asset word, because one "residential" or "tenant"
+       can turn up in a benefits paragraph. No text means no verdict: an empty
+       body is a fetch failure, not evidence (the 2026-09-09 rule). #>
+    param([string]$Title, [string]$Text)
+    $hits = @()
+    if ([string]::IsNullOrWhiteSpace($Title) -or $Title -notmatch '(?i)asset\s*manag') { return $hits }
+    if ($Title -match '(?i)\bIT\b|\bITAM\b|software|hardware|licens|technolog|digital|\bSAM\b|\bHAM\b|endpoint|cmdb') { return $hits }
+
+    $property = [ordered]@{
+        'affordable housing' = 'affordable\s+housing'
+        'real estate'        = 'real\s+estate'
+        'property'           = '\bpropert(y|ies)\b'
+        'multifamily'        = 'multi-?\s?family'
+        'LIHTC'              = '\bLIHTC\b|low[- ]income\s+housing\s+tax\s+credit'
+        'tenants'            = '\btenants?\b|\bresidents?\b'
+        # Not counted again when it is the second word of "affordable housing".
+        'housing'            = '(?<!affordable\s)\bhousing\b'
+        'apartments'         = '\bapartments?\b'
+        'leasing'            = '\blease[- ]?up\b|\bleasing\b|\boccupancy\b'
+        'HUD'                = '\bHUD\b'
+        'capital needs'      = 'capital\s+needs|replacement\s+reserves?'
+    }
+    $inTitle = @($property.Keys | Where-Object { $Title -match ('(?i)' + $property[$_]) })
+    if ($inTitle.Count -gt 0) { return $inTitle }
+
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $hits }
+    $itAsset = '(?i)\bITAM\b|\bIT\s+asset|software\s+(asset|licens)|hardware\s+asset|\bCMDB\b|ServiceNow|Flexera|licen[sc]e\s+(compliance|management|optimi)|endpoint|information\s+technology'
+    if ($Text -match $itAsset) { return $hits }
+    $inText = @($property.Keys | Where-Object { $Text -match ('(?i)' + $property[$_]) })
+    if ($inText.Count -ge 2) { return $inText }
+    return $hits
 }
 
 function Test-ItContext {
@@ -3180,6 +3225,16 @@ if (-not $SkipDetail) {
         $dev = @(Test-DeveloperRole $p.Content)
         if ($dev.Count -gt 0) {
             $p.Reason = ($p.Reason + ' | CHECK: reads like a software engineering role (' + ($dev -join '; ') + ')').Trim(' |')
+        }
+
+        # Property asset-manager gate, added 2026-11-23 (1.15.1). TitleProtect keeps
+        # every asset-manager title alive past \bmanager\b; this drops the ones the
+        # title or text shows are about buildings, not IT assets.
+        $prop = @(Test-PropertyAssetManager $p.Title $p.Content)
+        if ($prop.Count -gt 0) {
+            $p.Screen = 'out'
+            $p.Reason = 'asset manager for property, not IT: ' + ($prop -join ', ')
+            continue
         }
 
         # Compliance-title IT-context gate, added 2026-09-30. 'compliance analyst'

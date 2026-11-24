@@ -113,7 +113,7 @@ if ($parseErrors) {
 $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteTitle','Test-RemoteFlags',
           'Test-LicenceRequired','Get-DegreeFlag','Get-PayRange','Repair-TitleCase','Test-DeveloperRole',
           'Test-PhysicalDemand','Test-IsRequisitionId','Test-LooksLikeLocationList','Resolve-WorkdayBullets',
-          'Test-ComplianceTitleOnly','Test-ItContext','Merge-JobSweepProfile',
+          'Test-ComplianceTitleOnly','Test-ItContext','Test-PropertyAssetManager','Merge-JobSweepProfile',
           'ConvertFrom-DayforcePosting','Get-DayforcePay','Test-ClearanceRequired','Get-DegreeScreen',
           'Get-JsonValue','Get-WorkdayShortfall','ConvertFrom-RetryAfter','Get-RetryWait',
           'New-Posting','Convert-HtmlToText','Get-WorkdayJobs','Get-GreenhouseJobs','Get-LeverJobs',
@@ -672,6 +672,28 @@ catch { $threw = $true; $msg = "$_" }
 Remove-Item -LiteralPath $badMode -Force -ErrorAction SilentlyContinue
 Check 'bad ClearanceScreen throws'  $threw                    $true
 Check 'error names the value'       ($msg -like "*'dorp'*")   $true
+
+Write-Host "`n-- PROPERTY ASSET MANAGER: protected title, real-estate job (added 2026-11-23) --"
+$pam = { param($ti, $tx) $h = @(Test-PropertyAssetManager $ti $tx); if ($h.Count) { $h -join ', ' } else { 'keep' } }
+$propText = 'Oversee a portfolio of 40 affordable housing properties. Monitor occupancy and LIHTC compliance, and work with property managers on capital needs.'
+$itText   = 'Own the IT asset lifecycle in ServiceNow: hardware asset records, software licence compliance and endpoint refresh.'
+Check 'housing word in title drops'    (& $pam 'Affordable Housing - Asset Manager' '')            'affordable housing'
+Check 'real estate in title drops'     (& $pam 'Real Estate Asset Manager' $itText)                'real estate'
+Check 'property in title drops'        (& $pam 'Asset Manager, Multifamily Properties' '')         'property, multifamily'
+Check 'property text drops'            (& $pam 'Asset Manager' $propText)                          'affordable housing, property, LIHTC, leasing, capital needs'
+Check 'IT text keeps plain title'      (& $pam 'Asset Manager' $itText)                            'keep'
+Check 'IT words win over property'     (& $pam 'Asset Manager' ($propText + ' ' + $itText))        'keep'
+Check 'one property word not enough'   (& $pam 'Asset Manager' 'Benefits include help for residents of our region. Manage the asset register.') 'keep'
+Check 'affordable housing counts once' (& $pam 'Asset Manager' 'Our mission is affordable housing. You will track laptops.') 'keep'
+Check 'no text, no verdict'            (& $pam 'Asset Manager' '')                                 'keep'
+Check 'IT Asset Manager never judged'  (& $pam 'IT Asset Manager' $propText)                       'keep'
+Check 'Software Asset Manager kept'    (& $pam 'Software Asset Manager' $propText)                 'keep'
+Check 'ITAM title kept'                (& $pam 'ITAM Asset Management Lead' $propText)             'keep'
+Check 'Hardware Asset Mgmt kept'       (& $pam 'Hardware Asset Management Analyst' $propText)      'keep'
+Check 'non-asset title not judged'     (& $pam 'Property Systems Administrator' $propText)         'keep'
+Check 'blank title safe'               (& $pam '' $propText)                                       'keep'
+# The rule sits behind TitleProtect: the real-estate title still passes the title screen.
+Check 'title screen still protects'    ((Test-TitleMatch 'Affordable Housing - Asset Manager').Reason) 'title protected: asset manager'
 
 Write-Host "`n-- DEGREE SCREEN: drop / check / off for a degree with no equivalency clause (added 2026-11-23) --"
 # Every case but the two profile ones passes -Mode, so the result does not depend on the profile under test.
