@@ -40,7 +40,7 @@ That is what the test suite is for.
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs, company names or an employer list into `Sources` entries you can paste, finding careers pages on the way. See [Finding new sources](#finding-new-sources). |
 | `Find-JobSweepEmployers.ps1` | ✅ | Employer discovery. Lists employers in your zone from public datasets, for the scout to work through. See [Finding employers](#finding-employers). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 825 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 839 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -67,7 +67,8 @@ cd jobsweep
 Copy-Item JobSweep.local.example.psd1 JobSweep.local.psd1
 #    ...edit it: LocationInclude, CommuteExclude, real ATS tokens in Sources,
 #    ClearanceScreen (will you take a job that needs a clearance you don't
-#    hold?), and optionally OutputRoot.
+#    hold?), DegreeScreen (will you apply where a degree is required with no
+#    equivalency clause?), and optionally OutputRoot.
 
 # 3. Point the suite at your profile to see what your own rules do. Checks that
 #    name the example's fictional towns are skipped and counted; assert your own
@@ -120,6 +121,13 @@ A posting that offers a path to a clearance, such as *"ability to obtain"* or
 *"must obtain within 90 days"*, or only prefers one, is always kept with a
 `CHECK` note. "Secret" counts only beside the word clearance, so *"trade
 secrets"* is not a hit.
+
+**Degrees**: `DegreeScreen` works the same way for a bachelor's degree stated
+with no equivalency clause (no *"or equivalent experience"*, *"in lieu of"*).
+`'drop'` screens those postings out, `'check'` (the default) keeps them with a
+`CHECK` note, and `'off'` leaves no note. A posting that accepts equivalent
+experience is never dropped. The degree is read from prose and can be misread,
+so a dropped posting stays in `screened.csv` with its reason.
 
 ## Tracking board (optional)
 
@@ -327,7 +335,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1650  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1678  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -335,11 +343,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  825    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  825    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  839    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  839    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1650  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1678  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -378,6 +386,14 @@ decide what ships.
 
 ## Changelog
 
+- **1.15.0** (2026-11-23): a degree screen.
+  - `DegreeScreen` in the local profile: `'drop'`, `'check'` (the default) or
+    `'off'`. With `'drop'`, a posting whose text asks for a bachelor's degree
+    with no equivalency clause is screened out with the reason "degree stated
+    with no equivalency clause". Before this, such postings were only flagged
+    with a `CHECK` note, which is still the default.
+  - A misspelt value stops the run, as with `ClearanceScreen`.
+  - 14 new regression cases (839).
 - **1.14.0** (2026-11-23): a SmartRecruiters provider.
   - SmartRecruiters' Posting API (`api.smartrecruiters.com`) is closed to
     crawlers: its robots.txt allows only LinkedInBot. The career site

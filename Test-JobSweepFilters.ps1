@@ -114,7 +114,7 @@ $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteT
           'Test-LicenceRequired','Get-DegreeFlag','Get-PayRange','Repair-TitleCase','Test-DeveloperRole',
           'Test-PhysicalDemand','Test-IsRequisitionId','Test-LooksLikeLocationList','Resolve-WorkdayBullets',
           'Test-ComplianceTitleOnly','Test-ItContext','Merge-JobSweepProfile',
-          'ConvertFrom-DayforcePosting','Get-DayforcePay','Test-ClearanceRequired',
+          'ConvertFrom-DayforcePosting','Get-DayforcePay','Test-ClearanceRequired','Get-DegreeScreen',
           'Get-JsonValue','Get-WorkdayShortfall','ConvertFrom-RetryAfter','Get-RetryWait',
           'New-Posting','Convert-HtmlToText','Get-WorkdayJobs','Get-GreenhouseJobs','Get-LeverJobs',
           'ConvertFrom-RipplingListItem','Merge-RipplingRow','Get-RipplingPay','ConvertTo-IsoText',
@@ -672,6 +672,39 @@ catch { $threw = $true; $msg = "$_" }
 Remove-Item -LiteralPath $badMode -Force -ErrorAction SilentlyContinue
 Check 'bad ClearanceScreen throws'  $threw                    $true
 Check 'error names the value'       ($msg -like "*'dorp'*")   $true
+
+Write-Host "`n-- DEGREE SCREEN: drop / check / off for a degree with no equivalency clause (added 2026-11-23) --"
+# Every case but the two profile ones passes -Mode, so the result does not depend on the profile under test.
+Check 'hard + drop is out'         (Get-DegreeScreen 'hard' 'drop')          'out'
+Check 'hard + check is check'      (Get-DegreeScreen 'hard' 'check')         'check'
+Check 'hard + off is none'         (Get-DegreeScreen 'hard' 'off')           'none'
+Check 'equivalency never drops'    (Get-DegreeScreen 'equivalency' 'drop')   'none'
+Check 'no degree never drops'      (Get-DegreeScreen 'none' 'drop')          'none'
+Check 'unknown never drops'        (Get-DegreeScreen 'unknown' 'drop')       'none'
+Check 'blank flag never drops'     (Get-DegreeScreen '' 'drop')              'none'
+# Read end to end: the flag from real-looking text, then the screen.
+Check 'hard text + drop is out'    (Get-DegreeScreen (Get-DegreeFlag 'Required: Bachelor''s degree in Computer Science.') 'drop') 'out'
+Check 'equivalent text + drop kept' (Get-DegreeScreen (Get-DegreeFlag 'Bachelor''s degree or equivalent experience.') 'drop') 'none'
+Check 'default mode is check'      (& { Set-Variable -Name Config -Value @{}; Get-DegreeScreen 'hard' }) 'check'
+Check 'profile drop is read'       (& { Set-Variable -Name Config -Value @{ DegreeScreen = 'drop' }; Get-DegreeScreen 'hard' }) 'out'
+
+# A misspelt DegreeScreen value stops the run, as ClearanceScreen does.
+$badDeg = Join-Path ([IO.Path]::GetTempPath()) ("jobsweep-baddeg-{0}.psd1" -f ([guid]::NewGuid().ToString('N')))
+Set-Content -LiteralPath $badDeg -Value "@{ DegreeScreen = 'dorp' }" -Encoding utf8
+$threw = $false; $msg = ''
+try   { Merge-JobSweepProfile -Defaults $Config -ProfilePath @($badDeg) | Out-Null }
+catch { $threw = $true; $msg = "$_" }
+Remove-Item -LiteralPath $badDeg -Force -ErrorAction SilentlyContinue
+Check 'bad DegreeScreen throws'     $threw                                   $true
+Check 'error names the key'         ($msg -like "DegreeScreen must be*'dorp'*") $true
+# A valid value is accepted, not treated as an unknown key.
+$okDeg = Join-Path ([IO.Path]::GetTempPath()) ("jobsweep-okdeg-{0}.psd1" -f ([guid]::NewGuid().ToString('N')))
+Set-Content -LiteralPath $okDeg -Value "@{ DegreeScreen = 'drop' }" -Encoding utf8
+$okMerged = $null
+try   { $okMerged = Merge-JobSweepProfile -Defaults $Config -ProfilePath @($okDeg) }
+catch { Write-Verbose "valid DegreeScreen threw: $_" }
+Remove-Item -LiteralPath $okDeg -Force -ErrorAction SilentlyContinue
+Check 'DegreeScreen drop accepted'  ($null -ne $okMerged -and $okMerged.DegreeScreen -eq 'drop') $true
 
 # ---- MALFORMED LOCATION IS NOT A SCREEN-OUT, added 2026-09-25 ------------
 # iCIMS served a remote engineering req with the literal stub "US-". It is

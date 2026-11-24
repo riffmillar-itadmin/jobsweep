@@ -115,6 +115,18 @@ LiftingLimitLb = 50
 # note, because that is a door rather than a wall. Public Trust is not covered.
 ClearanceScreen = 'check'
 
+# ANOTHER ONE ONLY YOU CAN ANSWER: will you apply where a bachelor's degree is
+# required with no equivalency clause ("or equivalent experience", "in lieu
+# of") and you don't hold one?
+#
+#   'drop'  -- screen those postings out (they stay in screened.csv)
+#   'check' -- keep them, with a CHECK note in the reason (the default)
+#   'off'   -- no degree note at all
+#
+# The degree is read from prose and can be misread, so 'check' is the safe
+# start; move to 'drop' once the notes have shown you they are right.
+DegreeScreen = 'check'
+
 # ---- EMPLOYER DISCOVERY (Find-JobSweepEmployers.ps1) ----
 #
 # Optional. Find-JobSweepEmployers.ps1 reads public datasets (IRS nonprofits,
