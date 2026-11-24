@@ -40,7 +40,7 @@ That is what the test suite is for.
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs, company names or an employer list into `Sources` entries you can paste, finding careers pages on the way. See [Finding new sources](#finding-new-sources). |
 | `Find-JobSweepEmployers.ps1` | ✅ | Employer discovery. Lists employers in your zone from public datasets, for the scout to work through. See [Finding employers](#finding-employers). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 839 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 855 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -335,7 +335,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1678  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1710  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -343,11 +343,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  839    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  839    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  855    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  855    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1678  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1710  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -386,6 +386,18 @@ decide what ships.
 
 ## Changelog
 
+- **1.15.1** (2026-11-23): real-estate asset managers no longer ride on
+  `TitleProtect`.
+  - `TitleProtect` keeps every *asset manager* title past the `\bmanager\b`
+    exclusion so that IT and software asset managers survive, and it kept a
+    housing nonprofit's property asset manager too. After the detail fetch, an
+    asset-manager title is now dropped ("asset manager for property, not IT")
+    when the title has a housing or real-estate word, or the text has two or
+    more (affordable housing, property, multifamily, LIHTC, tenants, leasing,
+    HUD, capital needs) and no IT asset word (ITAM, IT asset, software licence,
+    CMDB, ServiceNow, endpoint). Titles naming IT, software, hardware, ITAM or
+    licensing are never judged, and a posting with no text is kept.
+  - 16 new regression cases (855).
 - **1.15.0** (2026-11-23): a degree screen.
   - `DegreeScreen` in the local profile: `'drop'`, `'check'` (the default) or
     `'off'`. With `'drop'`, a posting whose text asks for a bachelor's degree
