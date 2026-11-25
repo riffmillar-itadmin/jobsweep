@@ -24,6 +24,12 @@
     State lives in <OutputRoot>\Sweeps\_seen.json. Requisitions already in state are
     not reported again.
 
+    Postings you have applied to go in <OutputRoot>\Sweeps\_applied.txt, one per
+    line: Source|ReqId from a candidates file's Source and ReqId columns
+    (iCIMS|1234), or the posting URL. Lines starting with # are comments. A
+    listed posting is screened out as "already applied", so a repost or a req
+    found elsewhere does not come back.
+
 .PARAMETER OutputRoot
     Folder to write Sweeps\ into. Overrides OutputRoot in your local profile; with
     neither set, Sweeps\ goes beside this script.
@@ -189,6 +195,9 @@
     1.15.1 (2026-11-23): an asset-manager title that TitleProtect kept is dropped
     after the detail fetch when it is about property, not IT: housing or real-
     estate words in the title, or two or more in the text with no IT asset words.
+    1.16.0 (2026-11-24): applied list. Sweeps\_applied.txt holds one posting per
+    line, as Source|ReqId (the seen-state key) or the posting's URL; a match is
+    screened out as "already applied" before any other screen.
 
     Greenhouse, Workday and Microsoft dry runs verified working 2026-09-08.
     Requires PowerShell 5.1 or later. No modules, no authentication.
@@ -221,7 +230,7 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::
 # providers rate-limit an unidentified client harder. It is also the one string in
 # this script that leaves your machine on every request, so it belongs in your
 # LOCAL profile, not here. Set UserAgent there; this generic default is the fallback.
-$JobSweepVersion = '1.15.1'
+$JobSweepVersion = '1.16.0'
 $UserAgent = "JobSweep/$JobSweepVersion (+https://github.com/riffmillar-itadmin/jobsweep)"
 $PolitenessMs = 400     # default pause between requests
 $MaxPerQuery  = 60      # Microsoft: stop after this many results per query/location combo
@@ -1170,6 +1179,51 @@ function Test-PropertyAssetManager {
     $inText = @($property.Keys | Where-Object { $Text -match ('(?i)' + $property[$_]) })
     if ($inText.Count -ge 2) { return $inText }
     return $hits
+}
+
+function ConvertTo-AppliedUrl {
+    <# A posting URL reduced to what identifies it: no scheme, no www., no query
+       or fragment, no trailing slash, lower case. Tracking parameters (?source=,
+       ?trid=) differ between the link you applied from and the one a provider
+       returns, and they must not stop a match. Added 2026-11-24 (1.16.0). #>
+    param([string]$Url)
+    if ([string]::IsNullOrWhiteSpace($Url)) { return '' }
+    $u = ($Url.Trim() -split '[?#]')[0]
+    $u = $u -replace '(?i)^https?://', '' -replace '(?i)^www\.', ''
+    return $u.TrimEnd('/').ToLowerInvariant()
+}
+
+function Read-AppliedList {
+    <# Reads Sweeps\_applied.txt into keys and URLs. Added 2026-11-24 (1.16.0)
+       after a req applied to three days earlier came back as a new candidate:
+       the seen-state only knows what the sweep itself has reported, not what
+       you applied to from a board, a referral or another listing.
+
+       One entry per line. A line starting with http is a posting URL; a line
+       with a | is Source|ReqId, the candidates files' two columns. Blank
+       lines and # comments are skipped; anything else is returned in Bad so the
+       run can say which lines it could not use. Keys compare case-blind. #>
+    param([string[]]$Line)
+    $keys = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $urls = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $bad  = @()
+    foreach ($raw in @($Line)) {
+        $s = ("$raw" -replace '\s+#.*$', '').Trim()
+        if (-not $s -or $s.StartsWith('#')) { continue }
+        if ($s -match '(?i)^https?://\S+$') { [void]$urls.Add((ConvertTo-AppliedUrl $s)); continue }
+        if ($s -match '^([A-Za-z]+)\s*\|\s*(\S.*)$') { [void]$keys.Add(('{0}|{1}' -f $Matches[1], $Matches[2].Trim())); continue }
+        $bad += $s
+    }
+    return @{ Keys = $keys; Urls = $urls; Bad = $bad }
+}
+
+function Test-AppliedPosting {
+    <# True when a posting is on the applied list, by key or by URL. #>
+    param($Posting, $Applied)
+    if ($null -eq $Posting -or $null -eq $Applied) { return $false }
+    if ($Posting.Key -and $Applied.Keys.Contains([string]$Posting.Key)) { return $true }
+    $u = ConvertTo-AppliedUrl ([string]$Posting.Url)
+    return [bool]($u -and $Applied.Urls.Contains($u))
 }
 
 function Test-ItContext {
@@ -3059,6 +3113,7 @@ if (-not $rootOk) {
 $sweepDir = Join-Path $OutputRoot 'Sweeps'
 if (-not (Test-Path $sweepDir)) { New-Item -ItemType Directory -Path $sweepDir -Force | Out-Null }
 $stateFile = Join-Path $sweepDir '_seen.json'
+$appliedFile = Join-Path $sweepDir '_applied.txt'
 
 # --- logging ---------------------------------------------------------------
 $logDir = Join-Path $sweepDir 'logs'
@@ -3085,6 +3140,17 @@ if (Test-Path $stateFile) {
     } catch { Write-Log "Could not read state file; treating every posting as new. $($_.Exception.Message)" 'WARN' }
 }
 Write-Log "State: $($seen.Count) requisitions previously seen."
+
+# Applied list, added 2026-11-24 (1.16.0). Optional: no file means no list. A file
+# that exists but cannot be read is a WARN, never a reason to stop the sweep.
+$applied = Read-AppliedList @()
+if (Test-Path -LiteralPath $appliedFile) {
+    try {
+        $applied = Read-AppliedList @(Get-Content -LiteralPath $appliedFile -ErrorAction Stop)
+        Write-Log "Applied list: $($applied.Keys.Count) keys and $($applied.Urls.Count) URLs."
+        foreach ($b in $applied.Bad) { Write-Log "   _applied.txt line not used (not a URL or Source|ReqId): $b" 'WARN' }
+    } catch { Write-Log "Could not read _applied.txt; no applied list this run. $($_.Exception.Message)" 'WARN' }
+}
 
 $sources = $Config.Sources
 if ($Source) {
@@ -3138,7 +3204,9 @@ Write-Log "$($all.Count) postings retrieved, $($new.Count) not seen before." 'OK
 if ($new.Count -eq 0) { Write-Log 'Nothing new since the last run.' 'OK'; Complete-Run; exit $script:ExitCode }
 
 # --- title and location screen (cheap, runs before detail fetches) --------
+$appliedHits = 0
 foreach ($p in $new) {
+    if (Test-AppliedPosting $p $applied) { $p.Screen = 'out'; $p.Reason = 'already applied'; $appliedHits++; continue }
     $t = Test-TitleMatch $p.Title
     if (-not $t.Ok) { $p.Screen = 'out'; $p.Reason = $t.Reason; continue }
     $l = Test-LocationMatch $p.Location $p.Title
@@ -3148,6 +3216,8 @@ foreach ($p in $new) {
     # Test-LocationMatch again and would duplicate the note.
     if ($l.Check) { $p.Reason = ($p.Reason + ' | ' + $l.Check).Trim(' |') }
 }
+
+if ($appliedHits -gt 0) { Write-Log "$appliedHits new postings are on the applied list; screened out as already applied." }
 
 # --- detail fetch only for survivors -------------------------------------
 $keepers = @($new | Where-Object { $_.Screen -eq 'keep' })
