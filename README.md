@@ -40,7 +40,7 @@ That is what the test suite is for.
 | `JobSweep.local.example.psd1` | ✅ | A worked geography for a fictional state (Westmark) with placeholder employers. Copy it and replace every name. |
 | `Find-JobSweepSources.ps1` | ✅ | The source scout. Turns careers URLs, company names or an employer list into `Sources` entries you can paste, finding careers pages on the way. See [Finding new sources](#finding-new-sources). |
 | `Find-JobSweepEmployers.ps1` | ✅ | Employer discovery. Lists employers in your zone from public datasets, for the scout to work through. See [Finding employers](#finding-employers). |
-| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 855 cases, no network. |
+| `Test-JobSweepFilters.ps1` | ✅ | The regression suite. 868 cases, no network. |
 | `Test-JobSweepLint.ps1` | ✅ | Lints every script with PSScriptAnalyzer, exactly as CI does. Fails on errors and warnings. |
 | `JobSweep.Summary.ps1` | ✅ | The summary banner the tests, lint and scout end with. See [Tests](#tests). |
 | `PSScriptAnalyzerSettings.psd1` | ✅ | Lint rules for PSScriptAnalyzer: which rules are off and why. Read by the command line and the VS Code PowerShell extension. |
@@ -128,6 +128,22 @@ with no equivalency clause (no *"or equivalent experience"*, *"in lieu of"*).
 `CHECK` note, and `'off'` leaves no note. A posting that accepts equivalent
 experience is never dropped. The degree is read from prose and can be misread,
 so a dropped posting stays in `screened.csv` with its reason.
+
+**Applied postings**: the seen-state (`Sweeps\_seen.json`) only knows what the
+sweep itself has reported. A posting you applied to from somewhere else, or one
+that comes back under a new link, would be reported as new. List those in
+`Sweeps\_applied.txt`, one per line, and they are screened out as
+`already applied`:
+
+```text
+# Source|ReqId, from the Source and ReqId columns of a candidates file
+iCIMS|1234
+# or the posting's URL; tracking parameters after ? are ignored
+https://jobs.example.org/careers/9012-systems-engineer
+```
+
+The file is optional and is ignored by git. A line that is neither a URL nor a
+`Source|ReqId` key is reported as a warning in the log, not silently skipped.
 
 ## Tracking board (optional)
 
@@ -335,7 +351,7 @@ summary still prints.
 
 ```text
 ########################################################################
-##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1710  Fail 0  Skip 0
+##  Test-JobSweepFilters.ps1 -BothEditions  |  PASS  |  Pass 1736  Fail 0  Skip 0
 ########################################################################
 Target:  .\Invoke-JobSweep.ps1
 Run:     2026-11-19 09:15
@@ -343,11 +359,11 @@ PS:      Core 7.4.6
 
 Edition        Version        Profile                                               Pass Fail Skipped Result
 -------        -------        -------                                               ---- ---- ------- ------
-powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  855    0       0 PASS
-pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  855    0       0 PASS
+powershell.exe 5.1.26100.1234 JobSweep.targeting.psd1 + JobSweep.local.example.psd1  868    0       0 PASS
+pwsh           7.4.6          JobSweep.targeting.psd1 + JobSweep.local.example.psd1  868    0       0 PASS
 
 ########################################################################
-##  RESULT: PASS  (Pass 1710  Fail 0  Skip 0)
+##  RESULT: PASS  (Pass 1736  Fail 0  Skip 0)
 ########################################################################
 ```
 
@@ -386,6 +402,16 @@ decide what ships.
 
 ## Changelog
 
+- **1.16.0** (2026-11-24): an applied list.
+  - `Sweeps\_applied.txt` lists postings you have applied to, one per line, as
+    a `Source|ReqId` key or the posting's URL (scheme, `www.`, query and
+    trailing slash are ignored when matching). A listed posting is screened
+    out as `already applied` before any other screen, so it never costs a
+    detail fetch. The seen-state could not do this: it only holds what the
+    sweep has reported, and a req applied to from elsewhere came back as new.
+  - The file is optional; unreadable lines are logged as warnings. It is
+    added to `.gitignore` beside `_seen.json`.
+  - 13 new regression cases (868).
 - **1.15.1** (2026-11-23): real-estate asset managers no longer ride on
   `TitleProtect`.
   - `TitleProtect` keeps every *asset manager* title past the `\bmanager\b`

@@ -113,7 +113,7 @@ if ($parseErrors) {
 $want = @('Test-TitleMatch','Test-LocationMatch','Test-IsRemote','Test-IsRemoteTitle','Test-RemoteFlags',
           'Test-LicenceRequired','Get-DegreeFlag','Get-PayRange','Repair-TitleCase','Test-DeveloperRole',
           'Test-PhysicalDemand','Test-IsRequisitionId','Test-LooksLikeLocationList','Resolve-WorkdayBullets',
-          'Test-ComplianceTitleOnly','Test-ItContext','Test-PropertyAssetManager','Merge-JobSweepProfile',
+          'Test-ComplianceTitleOnly','Test-ItContext','Test-PropertyAssetManager','ConvertTo-AppliedUrl','Read-AppliedList','Test-AppliedPosting','Merge-JobSweepProfile',
           'ConvertFrom-DayforcePosting','Get-DayforcePay','Test-ClearanceRequired','Get-DegreeScreen',
           'Get-JsonValue','Get-WorkdayShortfall','ConvertFrom-RetryAfter','Get-RetryWait',
           'New-Posting','Convert-HtmlToText','Get-WorkdayJobs','Get-GreenhouseJobs','Get-LeverJobs',
@@ -694,6 +694,35 @@ Check 'non-asset title not judged'     (& $pam 'Property Systems Administrator' 
 Check 'blank title safe'               (& $pam '' $propText)                                       'keep'
 # The rule sits behind TitleProtect: the real-estate title still passes the title screen.
 Check 'title screen still protects'    ((Test-TitleMatch 'Affordable Housing - Asset Manager').Reason) 'title protected: asset manager'
+
+Write-Host "`n-- APPLIED LIST: Sweeps\_applied.txt keys and URLs (added 2026-11-24) --"
+$appLines = @(
+    '# postings already applied to',
+    '',
+    'iCIMS|1234',
+    'workday | R-5678   # trailing comment',
+    'https://www.jobs.example.org/careers/9012-systems-engineer/?source=board&trid=abc',
+    'Example Outfitters - Systems Engineer'
+)
+$app = Read-AppliedList $appLines
+Check 'applied: keys read'            $app.Keys.Count                                    2
+Check 'applied: URLs read'            $app.Urls.Count                                    1
+Check 'applied: bad line reported'    (@($app.Bad) -join ';')                           'Example Outfitters - Systems Engineer'
+Check 'applied: empty list is empty'  ((Read-AppliedList @()).Keys.Count)                0
+Check 'URL: query and scheme dropped' (ConvertTo-AppliedUrl 'HTTPS://www.Jobs.Example.org/careers/9012-systems-engineer/?source=x#top') 'jobs.example.org/careers/9012-systems-engineer'
+Check 'URL: blank is blank'           (ConvertTo-AppliedUrl '')                          ''
+$pKey   = New-Posting -Source 'iCIMS'   -Company 'Example Co' -Title 'Systems Engineer' -Location 'Harborview, WM' -Url 'https://careers-example.icims.com/jobs/1234/job' -ReqId '1234'
+$pCase  = New-Posting -Source 'Workday' -Company 'Example Co' -Title 'Systems Engineer' -Location 'Harborview, WM' -Url 'https://example.wd1.myworkdayjobs.com/x/job/R-5678' -ReqId 'R-5678'
+$pUrl   = New-Posting -Source 'Greenhouse' -Company 'Example Co' -Title 'Systems Engineer' -Location 'Harborview, WM' -Url 'http://jobs.example.org/careers/9012-systems-engineer' -ReqId '9012'
+$pOther = New-Posting -Source 'iCIMS'   -Company 'Example Co' -Title 'Systems Engineer' -Location 'Harborview, WM' -Url 'https://careers-example.icims.com/jobs/12345/job' -ReqId '12345'
+$pSame  = New-Posting -Source 'Lever'   -Company 'Example Co' -Title 'Systems Engineer' -Location 'Harborview, WM' -Url 'https://jobs.lever.co/example/abc' -ReqId '1234'
+Check 'applied: key matches'          (Test-AppliedPosting $pKey  $app)                  $true
+Check 'applied: key case-blind'       (Test-AppliedPosting $pCase $app)                  $true
+Check 'applied: URL matches'          (Test-AppliedPosting $pUrl  $app)                  $true
+Check 'applied: longer id no match'   (Test-AppliedPosting $pOther $app)                 $false
+Check 'applied: same id, other source' (Test-AppliedPosting $pSame $app)                 $false
+Check 'applied: no list, no match'    (Test-AppliedPosting $pKey (Read-AppliedList @())) $false
+Check 'applied: null list safe'       (Test-AppliedPosting $pKey $null)                  $false
 
 Write-Host "`n-- DEGREE SCREEN: drop / check / off for a degree with no equivalency clause (added 2026-11-23) --"
 # Every case but the two profile ones passes -Mode, so the result does not depend on the profile under test.
